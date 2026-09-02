@@ -314,6 +314,15 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       description: 'Queso Rancho'
     },
     {
+      id: 'p_granola_150',
+      name: 'Granola $150',
+      title: 'GRANOLA 150',
+      price: 150,
+      emoji: '🥣',
+      tag: 'No es Pan',
+      description: 'Granola Artesanal'
+    },
+    {
       id: 'p_domo_25',
       name: 'Charola / Domo $25',
       title: 'CHAROLA 25',
@@ -1473,7 +1482,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               </div>
 
               {/* Botones Claros y Táctiles para Acompañamientos, Paleta desplegable y Postres */}
-              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2">
                 {/* 1. Leche 35 */}
                 <button
                   id="companion-btn-p_leche"
@@ -1540,6 +1549,24 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   </div>
                   <div className="pt-2 text-xs sm:text-sm font-black text-sky-950 leading-tight">QUESO $150</div>
                   <div className="text-[9px] font-extrabold text-sky-700 leading-none mt-0.5">Rancho</div>
+                </button>
+
+                {/* 5. Granola 150 */}
+                <button
+                  id="companion-btn-p_granola"
+                  type="button"
+                  onClick={() => handleAddPrice(150, 'Granola $150', 'p_granola_150')}
+                  className="group relative bg-gradient-to-b from-amber-50 to-white hover:from-amber-100 hover:to-amber-50 border-2 border-amber-300 hover:border-amber-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  title="Granola en $150"
+                >
+                  <div className="absolute top-1 left-1.5 text-sm">🥣</div>
+                  <div className="absolute top-1 right-1.5">
+                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-amber-200 font-extrabold shadow-2xs font-mono">
+                      +{selectedMultiplier}
+                    </span>
+                  </div>
+                  <div className="pt-2 text-xs sm:text-sm font-black text-amber-950 leading-tight">GRANOLA $150</div>
+                  <div className="text-[9px] font-extrabold text-amber-700 leading-none mt-0.5">Artesanal</div>
                 </button>
 
                 {/* 5. PALETA (1 Solo Botón con 3 Precios Desplegables: 40, 45, 50) */}

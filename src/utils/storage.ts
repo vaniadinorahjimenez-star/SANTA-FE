@@ -144,6 +144,7 @@ export const DEFAULT_PRODUCTS: BreadProduct[] = [
   { id: 'p_domo_25', name: 'Charola / Domo $25', price: 25, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_nata', name: 'Nata Artesanal', price: 90, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_queso', name: 'Queso de Rancho', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
+  { id: 'p_granola_150', name: 'Granola en $150', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_paleta_40', name: 'Paleta de Hielo $40', price: 40, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_paleta_45', name: 'Paleta Especial $45', price: 45, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_paleta_50', name: 'Paleta Gourmet $50', price: 50, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
@@ -602,7 +603,21 @@ export function saveSettings(settings: Settings): void {
 export function loadProducts(): BreadProduct[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const stored: BreadProduct[] = JSON.parse(raw);
+      const existingIds = new Set(stored.map(p => p.id));
+      let updated = false;
+      DEFAULT_PRODUCTS.forEach(dp => {
+        if (!existingIds.has(dp.id)) {
+          stored.push(dp);
+          updated = true;
+        }
+      });
+      if (updated) {
+        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(stored));
+      }
+      return stored;
+    }
   } catch (e) {
     console.error('Error loading products', e);
   }

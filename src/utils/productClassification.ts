@@ -44,6 +44,7 @@ const NON_BREAD_KEYWORDS = [
   'crema',
   'yogurt',
   'yoghurt',
+  'granola',
   'hielo'
 ];
 
@@ -70,6 +71,7 @@ export function isNonBreadProduct(item: { name?: string; category?: string; prod
     idLower.startsWith('p_domo') ||
     idLower.startsWith('p_nata') ||
     idLower.startsWith('p_queso') ||
+    idLower.startsWith('p_granola') ||
     idLower.startsWith('p_paleta')
   ) {
     return true;
