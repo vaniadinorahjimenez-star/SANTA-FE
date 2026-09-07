@@ -255,27 +255,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>{currentTime}</span>
           </div>
 
-          {/* Accessibility text zoom controls */}
-          <div className="hidden sm:flex items-center bg-[#FAF8F6] rounded-xl p-0.5 border border-[#E5E1DA]" title="Tamaño de Letra para Mayor Comodidad">
-            <button
-              onClick={() => onToggleZoom(-1)}
-              className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-white transition-colors cursor-pointer"
-              title="Reducir tamaño"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="text-[10px] font-bold px-1 text-slate-700">
-              {zoomLevel === 0 ? 'A' : zoomLevel > 0 ? `+${zoomLevel}` : zoomLevel}
-            </span>
-            <button
-              onClick={() => onToggleZoom(1)}
-              className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-white transition-colors cursor-pointer"
-              title="Aumentar tamaño de letra"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
           {/* Cashier Badge */}
           <div className="hidden lg:flex bg-[#FFF5F0] text-[#D95D39] font-bold text-[10px] px-2.5 py-1 rounded-xl items-center gap-1.5 border border-[#E5E1DA]">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>

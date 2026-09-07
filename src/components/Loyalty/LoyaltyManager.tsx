@@ -61,21 +61,21 @@ export const LoyaltyManager: React.FC<LoyaltyManagerProps> = ({
 
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || newPhone.replace(/\D/g, '').length < 10) {
-      alert('Por favor ingrese un nombre válido y un teléfono de 10 dígitos.');
+    const cleanPhone = newPhone.replace(/\D/g, '').slice(0, 10);
+    if (cleanPhone.length < 10) {
+      alert('Por favor ingrese un teléfono válido de 10 dígitos.');
       return;
     }
 
-    const cleanPhone = newPhone.replace(/\D/g, '').slice(0, 10);
     const existing = customers.find(c => c.phone.replace(/\D/g, '') === cleanPhone);
     if (existing) {
-      alert(`Este número ya está registrado a nombre de: ${existing.name}`);
+      alert(`Este número ya está registrado en el Club de Puntos: ${existing.phone}`);
       return;
     }
 
     const newCustomer: Customer = {
       id: `cust-${Date.now()}`,
-      name: newName.trim(),
+      name: `Tel: ${cleanPhone}`,
       phone: cleanPhone,
       points: Math.max(0, initialBonusPoints),
       totalSpent: initialBonusPoints * 20, // initial benchmark
@@ -276,13 +276,10 @@ export const LoyaltyManager: React.FC<LoyaltyManagerProps> = ({
                             <span>{tier.emoji}</span>
                             <span>{tier.name}</span>
                           </span>
-                          <h3 className="font-bold text-slate-900 text-sm leading-snug line-clamp-1">
-                            {customer.name}
+                          <h3 className="font-bold font-mono text-slate-900 text-sm leading-snug line-clamp-1 flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5 text-[#D95D39]" />
+                            <span>{customer.phone}</span>
                           </h3>
-                          <span className="text-xs text-slate-500 font-mono flex items-center gap-1 mt-0.5">
-                            <Phone className="w-3 h-3 text-[#D95D39]" />
-                            {customer.phone}
-                          </span>
                         </div>
 
                         {/* Points badge */}
@@ -349,14 +346,11 @@ export const LoyaltyManager: React.FC<LoyaltyManagerProps> = ({
 
                 <div>
                   <span className="text-[10px] uppercase tracking-wider text-slate-300 block">
-                    Titular del beneficio
+                    Teléfono Celular Registrado
                   </span>
-                  <h3 className="text-lg font-black text-white truncate">
-                    {selectedCustomer.name}
+                  <h3 className="text-xl font-black font-mono text-amber-300 truncate">
+                    📱 {selectedCustomer.phone}
                   </h3>
-                  <p className="font-mono text-xs text-slate-300 mt-0.5">
-                    TEL: {selectedCustomer.phone}
-                  </p>
                 </div>
 
                 <div className="pt-2 border-t border-white/15 flex items-end justify-between">
@@ -468,23 +462,6 @@ export const LoyaltyManager: React.FC<LoyaltyManagerProps> = ({
             <form onSubmit={handleRegisterSubmit} className="p-5 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Nombre Completo del Cliente *
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. Doña Lupita Sánchez"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-[#FAF8F6] border border-[#E5E1DA] rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#D95D39] text-slate-900"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Número Celular (10 dígitos) *
                 </label>
                 <div className="relative">
@@ -493,14 +470,14 @@ export const LoyaltyManager: React.FC<LoyaltyManagerProps> = ({
                     type="tel"
                     required
                     maxLength={10}
-                    placeholder="Ej. 5512345678"
+                    placeholder="Ej. 4421234567"
                     value={newPhone}
                     onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ''))}
                     className="w-full pl-9 pr-3 py-2.5 bg-[#FAF8F6] border border-[#E5E1DA] rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#D95D39] text-slate-900 font-mono"
                   />
                 </div>
                 <span className="text-[11px] text-slate-500 mt-1 block">
-                  El cliente acumulará puntos dictando este número en cada compra.
+                  El cliente acumulará o canjeará puntos dictando este número en cada compra.
                 </span>
               </div>
 

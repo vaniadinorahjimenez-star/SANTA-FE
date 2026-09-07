@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ticketFooter: '¡Gracias por su preferencia! Vuelva pronto.',
   loyaltyPointsPerPesos: 20, // $20 pesos = 1 punto
   loyaltyValuePerPoint: 1, // 1 punto = $1 peso
-  quickPrices: [5, 6.5, 8, 12, 15, 18, 20, 25, 30, 35],
+  quickPrices: [5, 6.5, 12, 15, 18, 20, 25, 30, 35],
   pinAdmin: '13579',
   adminPin: '13579',
   taxRate: 0,
@@ -124,7 +124,7 @@ export const DEFAULT_PRODUCTS: BreadProduct[] = [
   { id: 'p6_5', name: 'Pan Especial / Telera $6.50', price: 6.5, category: 'Bolillo y Telera', isQuickPreset: true },
   { id: 'p7_pref', name: 'Pan Preferente $7', price: 7, category: 'Pan Dulce Tradicional' },
   { id: 'p7_5_pref', name: 'Pan Preferente $7.50', price: 7.5, category: 'Pan Dulce Tradicional' },
-  { id: 'p8', name: 'Bolillo / Telera Tradicional $8', price: 8, category: 'Bolillo y Telera', isQuickPreset: true },
+  { id: 'p8', name: 'Bolillo / Telera Tradicional $8', price: 8, category: 'Bolillo y Telera', isQuickPreset: false },
   { id: 'p9_pref', name: 'Pan Preferente $9', price: 9, category: 'Pan Dulce Tradicional' },
   { id: 'p11_pref', name: 'Pan Preferente $11', price: 11, category: 'Pan Dulce Tradicional' },
   { id: 'p12', name: 'Dona / Pan Dulce $12', price: 12, category: 'Pan Dulce Tradicional', isQuickPreset: true },
@@ -142,10 +142,9 @@ export const DEFAULT_PRODUCTS: BreadProduct[] = [
   { id: 'p_gelatina_20', name: 'Gelatina', price: 20, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_arroz_leche_25', name: 'Arroz con Leche', price: 25, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_domo_25', name: 'Charola / Domo $25', price: 25, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p_nata', name: 'Nata Artesanal', price: 90, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p_queso', name: 'Queso de Rancho', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p_granola_150', name: 'Granola en $150', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p100', name: 'Pastel Individual / Tarta Frutas', price: 100, category: 'Pasteles y Tartas', isQuickPreset: true },
+  { id: 'p_nata', name: 'Nata Artesanal', price: 90, category: 'Lácteos y Acompañamientos', isQuickPreset: false },
+  { id: 'p_queso', name: 'Queso de Rancho', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: false },
+  { id: 'p100', name: 'Pastel Individual / Tarta Frutas', price: 100, category: 'Pasteles y Tartas', isQuickPreset: false },
   // Extra catalog items
   { id: 'p_concha_choco', name: 'Concha Especial Chocolate', price: 15, category: 'Pan Dulce Tradicional' },
   { id: 'p_ojo_buey', name: 'Ojo de Buey', price: 12, category: 'Pan Dulce Tradicional' },
@@ -584,6 +583,20 @@ export function loadSettings(): Settings {
       }
       if (!parsed.phone || parsed.phone.includes('1234')) {
         parsed.phone = DEFAULT_SETTINGS.phone;
+      }
+      if (parsed.quickPrices && Array.isArray(parsed.quickPrices)) {
+        const originalLen = parsed.quickPrices.length;
+        parsed.quickPrices = parsed.quickPrices.filter((p: number) => {
+          const num = Number(p);
+          return num !== 8 && !(num >= 90 && num <= 100);
+        });
+        if (parsed.quickPrices.length !== originalLen) {
+          try {
+            localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(parsed));
+          } catch {
+            // ignore
+          }
+        }
       }
       return { ...DEFAULT_SETTINGS, ...parsed };
     }

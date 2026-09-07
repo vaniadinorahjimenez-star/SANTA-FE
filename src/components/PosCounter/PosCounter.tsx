@@ -23,6 +23,7 @@ import {
   Delete, 
   Check,
   Receipt,
+  Keyboard,
   Bluetooth,
   Radio,
   Calendar,
@@ -135,12 +136,13 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   // Ticket lines
   const [ticketItems, setTicketItems] = useState<TicketItem[]>([]);
   
-  // Customer & Loyalty
+  // Customer & Loyalty (Solo teléfono, sin nombre)
   const [phoneSearch, setPhoneSearch] = useState<string>('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [newCustomerName, setNewCustomerName] = useState<string>('');
   const [showNewCustomerForm, setShowNewCustomerForm] = useState<boolean>(false);
   const [pointsToRedeem, setPointsToRedeem] = useState<number>(0);
+  const [showCustomerPhoneKeyboardModal, setShowCustomerPhoneKeyboardModal] = useState<boolean>(false);
+  const [virtualPhoneInput, setVirtualPhoneInput] = useState<string>('');
 
   // Completed Ticket Modal state (optional fallback)
   const [completedTicket, setCompletedTicket] = useState<SaleTicket | null>(null);
@@ -221,7 +223,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       ) || activeMasterCatalog.find(p => p.num === b.fallbackNum);
       const calculatedPrice = found 
         ? getProductPriceForCustomer(found, orderCustomerName, 'recoger_tienda') 
-        : 8;
+        : 6.5;
       return {
         ...b,
         product: found,
@@ -268,8 +270,17 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   // Postres selection modal
   const [showPostresModal, setShowPostresModal] = useState<boolean>(false);
 
-  // Precios rápidos de mostrador solicitados: 5, 6.50, 8, 12, 15, 18, 20, 25, 30, 35
-  const quickPrices = [5, 6.5, 8, 12, 15, 18, 20, 25, 30, 35];
+  // Precios rápidos de mostrador solicitados: 5, 6.50, 12, 15, 18, 20, 25, 30, 35
+  // Eliminados el 8 y los botones del 90 al 100 para que queden exactamente 2 filas de 5 botones (9 de pan + 1 botón manual OTRO)
+  const quickPrices = (settings.quickPrices && settings.quickPrices.length > 0
+    ? settings.quickPrices
+    : [5, 6.5, 12, 15, 18, 20, 25, 30, 35]
+  )
+    .filter(p => {
+      const num = Number(p);
+      return num !== 8 && !(num >= 90 && num <= 100);
+    })
+    .slice(0, 9);
 
   // Helper formatting for prices
   const formatMoneyLabel = (num: number) => {
@@ -555,15 +566,58 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     setCashGivenInput('');
   };
 
-  // Register new customer quickly
-  const handleCreateCustomer = () => {
-    const cleanPhone = phoneSearch.replace(/\D/g, '');
-    if (!cleanPhone || cleanPhone.length < 10) return;
-    const name = newCustomerName.trim() || `Cliente ${cleanPhone.slice(-4)}`;
+  // Manejo de pulsación en el Teclado Táctil de Teléfono
+  const handleVirtualPhoneKeyPress = (key: string) => {
+    playBeep(700, 'sine', 0.04);
+    if (key === 'CLEAR') {
+      setVirtualPhoneInput('');
+      setPhoneSearch('');
+      setSelectedCustomer(null);
+      return;
+    }
+    if (key === 'BACKSPACE') {
+      setVirtualPhoneInput(prev => {
+        const next = prev.slice(0, -1);
+        setPhoneSearch(next);
+        return next;
+      });
+      return;
+    }
+    // Dígitos 0-9 (máximo 10 dígitos)
+    setVirtualPhoneInput(prev => {
+      const clean = prev.replace(/\D/g, '');
+      if (clean.length >= 10) return prev;
+      const next = clean + key;
+      setPhoneSearch(next);
+      return next;
+    });
+  };
+
+  // Afiliar o seleccionar cliente por teléfono inmediatamente (sin pedir nombre)
+  const handleRegisterOrSelectPhone = (targetPhone?: string) => {
+    const raw = targetPhone || virtualPhoneInput || phoneSearch;
+    const clean = raw.replace(/\D/g, '');
+    if (clean.length < 7) {
+      playBeep(350, 'sawtooth', 0.08);
+      return;
+    }
+
+    // Verificar si ya existe registrado
+    const existing = customers.find(c => c.phone.replace(/\D/g, '') === clean);
+    if (existing) {
+      setSelectedCustomer(existing);
+      setPhoneSearch(existing.phone);
+      setShowNewCustomerForm(false);
+      setShowCustomerPhoneKeyboardModal(false);
+      playCashSound();
+      return;
+    }
+
+    // Crear y afiliar nuevo cliente solo con su número telefónico
     const newCust: Customer = {
       id: `cust-${Date.now()}`,
-      name,
-      phone: cleanPhone,
+      name: `Tel: ${clean}`,
+      phone: clean,
       points: 0,
       totalSpent: 0,
       visitsCount: 0,
@@ -571,8 +625,15 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     };
     onRegisterCustomer(newCust);
     setSelectedCustomer(newCust);
+    setPhoneSearch(clean);
     setShowNewCustomerForm(false);
+    setShowCustomerPhoneKeyboardModal(false);
     playCashSound();
+  };
+
+  // Register new customer quickly (solo teléfono)
+  const handleCreateCustomer = () => {
+    handleRegisterOrSelectPhone(phoneSearch);
   };
 
   // Process & Complete Sale with Direct Print (Sin abrir ventana secundaria)
@@ -584,6 +645,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     const folio = getNextTicketFolio();
     const effectivePaid = numericCashGiven > 0 ? numericCashGiven : total;
     const effectiveChange = effectivePaid >= total ? effectivePaid - total : 0;
+    const cleanPhone = selectedCustomer ? selectedCustomer.phone : phoneSearch.replace(/\D/g, '');
+    const custIdentifier = cleanPhone ? `Tel: ${cleanPhone}` : undefined;
 
     const newTicket: SaleTicket = {
       id: `sale-${Date.now()}`,
@@ -598,8 +661,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       paymentMethod: 'efectivo',
       amountPaid: effectivePaid,
       change: effectiveChange,
-      customerName: selectedCustomer ? selectedCustomer.name : (newCustomerName.trim() || undefined),
-      customerPhone: selectedCustomer ? selectedCustomer.phone : (phoneSearch.replace(/\D/g, '') || undefined),
+      customerName: custIdentifier,
+      customerPhone: cleanPhone || undefined,
       pointsEarned,
       pointsRedeemed: actualDiscount,
       isSpecialDiscount: isSpecialCustomerDiscount,
@@ -617,11 +680,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
         visitsCount: selectedCustomer.visitsCount + 1,
         lastVisit: getTodayString()
       };
-    } else if (phoneSearch.replace(/\D/g, '').length >= 10 && newCustomerName.trim()) {
+    } else if (cleanPhone.length >= 7) {
       updatedCust = {
         id: `cust-${Date.now()}`,
-        name: newCustomerName.trim(),
-        phone: phoneSearch.replace(/\D/g, ''),
+        name: `Tel: ${cleanPhone}`,
+        phone: cleanPhone,
         points: pointsEarned,
         totalSpent: total,
         visitsCount: 1,
@@ -648,7 +711,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     setCashGivenInput('');
     setPhoneSearch('');
     setSelectedCustomer(null);
-    setNewCustomerName('');
+    setVirtualPhoneInput('');
     setShowNewCustomerForm(false);
   };
 
@@ -661,7 +724,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     const folio = getNextTicketFolio();
     const currentTotal = total;
     const currentPieces = totalPieces;
-    const custName = selectedCustomer ? selectedCustomer.name : (newCustomerName.trim() || undefined);
+    const cleanPhone = selectedCustomer ? selectedCustomer.phone : phoneSearch.replace(/\D/g, '');
+    const custIdentifier = cleanPhone ? `Tel: ${cleanPhone}` : undefined;
     const effectivePaid = numericCashGiven > 0 ? numericCashGiven : currentTotal;
     const effectiveChange = effectivePaid >= currentTotal ? effectivePaid - currentTotal : 0;
 
@@ -678,8 +742,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       paymentMethod: 'efectivo',
       amountPaid: effectivePaid,
       change: effectiveChange,
-      customerName: custName,
-      customerPhone: selectedCustomer ? selectedCustomer.phone : (phoneSearch.replace(/\D/g, '') || undefined),
+      customerName: custIdentifier,
+      customerPhone: cleanPhone || undefined,
       pointsEarned,
       pointsRedeemed: actualDiscount,
       isSpecialDiscount: isSpecialCustomerDiscount,
@@ -697,11 +761,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
         visitsCount: selectedCustomer.visitsCount + 1,
         lastVisit: getTodayString()
       };
-    } else if (phoneSearch.replace(/\D/g, '').length >= 10 && newCustomerName.trim()) {
+    } else if (cleanPhone.length >= 7) {
       updatedCust = {
         id: `cust-${Date.now()}`,
-        name: newCustomerName.trim(),
-        phone: phoneSearch.replace(/\D/g, ''),
+        name: `Tel: ${cleanPhone}`,
+        phone: cleanPhone,
         points: pointsEarned,
         totalSpent: currentTotal,
         visitsCount: 1,
@@ -716,7 +780,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       total: currentTotal,
       folio,
       piecesCount: currentPieces,
-      customerName: custName
+      customerName: custIdentifier
     });
 
     // Reset local counter state for next customer
@@ -726,7 +790,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     setCashGivenInput('');
     setPhoneSearch('');
     setSelectedCustomer(null);
-    setNewCustomerName('');
+    setVirtualPhoneInput('');
     setShowNewCustomerForm(false);
   };
 
@@ -741,6 +805,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
 
     playCashSound();
     const folio = getNextTicketFolio();
+    const cleanPhone = selectedCustomer ? selectedCustomer.phone : phoneSearch.replace(/\D/g, '');
+    const custIdentifier = cleanPhone ? `Tel: ${cleanPhone}` : undefined;
 
     const newTicket: SaleTicket = {
       id: `sale-${Date.now()}`,
@@ -759,8 +825,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       cardReference: cardDetails.reference || folio,
       amountPaid: total,
       change: 0,
-      customerName: selectedCustomer ? selectedCustomer.name : (newCustomerName.trim() || undefined),
-      customerPhone: selectedCustomer ? selectedCustomer.phone : (phoneSearch.replace(/\D/g, '') || undefined),
+      customerName: custIdentifier,
+      customerPhone: cleanPhone || undefined,
       pointsEarned,
       pointsRedeemed: actualDiscount,
       isSpecialDiscount: isSpecialCustomerDiscount,
@@ -778,11 +844,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
         visitsCount: selectedCustomer.visitsCount + 1,
         lastVisit: getTodayString()
       };
-    } else if (phoneSearch.replace(/\D/g, '').length >= 10 && newCustomerName.trim()) {
+    } else if (cleanPhone.length >= 7) {
       updatedCust = {
         id: `cust-${Date.now()}`,
-        name: newCustomerName.trim(),
-        phone: phoneSearch.replace(/\D/g, ''),
+        name: `Tel: ${cleanPhone}`,
+        phone: cleanPhone,
         points: pointsEarned,
         totalSpent: total,
         visitsCount: 1,
@@ -810,7 +876,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     setCashGivenInput('');
     setPhoneSearch('');
     setSelectedCustomer(null);
-    setNewCustomerName('');
+    setVirtualPhoneInput('');
     setShowNewCustomerForm(false);
   };
 
@@ -836,8 +902,9 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       setOrderCustomerName(selectedCustomer.name);
       setOrderCustomerPhone(selectedCustomer.phone);
     } else {
-      setOrderCustomerName(newCustomerName.trim() || '');
-      setOrderCustomerPhone(phoneSearch.replace(/\D/g, '') || '');
+      const cleanP = phoneSearch.replace(/\D/g, '');
+      setOrderCustomerName(cleanP ? `Tel: ${cleanP}` : '');
+      setOrderCustomerPhone(cleanP);
     }
 
     // Inicializar la lista de productos por entregar con los items del ticket actual (o lista vacía para llenar desde 0)
@@ -1116,7 +1183,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       setCashGivenInput('');
       setPhoneSearch('');
       setSelectedCustomer(null);
-      setNewCustomerName('');
+      setVirtualPhoneInput('');
       setShowNewCustomerForm(false);
     }
     setShowOrderModal(false);
@@ -1166,127 +1233,71 @@ export const PosCounter: React.FC<PosCounterProps> = ({
         </div>
       )}
 
-      {/* Main Grid: Left side Price & Quantity controls (67%), Right side Compact Sticky Ticket (33%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-start">
+      {/* Main Grid: Left side Price & Quantity controls (58%), Right side Ticket & Checkout (42%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3 items-start">
         
         {/* LEFT COLUMN: Fast Multiplier + Big Preset Price Buttons & Accompaniments */}
-        <div className="lg:col-span-8 space-y-2">
+        <div className="lg:col-span-7 space-y-1.5">
           
-          {/* BARRA DE CAMBIO DE TURNO MANUAL (Turno 1 / Turno 2) */}
-          <div className="bg-gradient-to-r from-amber-50 via-white to-indigo-50/50 rounded-2xl p-2.5 sm:p-3 shadow-xs border-2 border-amber-300 flex flex-wrap items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2.5 min-w-[200px]">
-              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-xl shadow-xs border ${
-                activeShift === 'turno1' 
-                  ? 'bg-amber-500 text-white border-amber-600' 
-                  : 'bg-indigo-600 text-white border-indigo-700'
+          {/* BARRA DE TURNO ULTRA-DELGADA */}
+          <div className="bg-white rounded-xl px-2.5 py-1 shadow-2xs border border-slate-200 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm leading-none">{activeShift === 'turno1' ? '🌅' : '🌇'}</span>
+              <span className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">Turno:</span>
+              <span className={`text-[11px] font-black px-2 py-0.2 rounded-full border ${
+                activeShift === 'turno1'
+                  ? 'bg-amber-100 text-amber-950 border-amber-300'
+                  : 'bg-indigo-100 text-indigo-950 border-indigo-300'
               }`}>
-                {activeShift === 'turno1' ? '🌅' : '🌇'}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs sm:text-sm font-black text-slate-900 tracking-tight">
-                    TURNO REGISTRANDO:
-                  </span>
-                  <span className={`text-[11px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                    activeShift === 'turno1'
-                      ? 'bg-amber-100 text-amber-950 border-amber-400'
-                      : 'bg-indigo-100 text-indigo-950 border-indigo-400'
-                  }`}>
-                    {activeShift === 'turno1' ? 'Turno 1 (Mañana)' : 'Turno 2 (Tarde)'}
-                  </span>
-                </div>
-                <span className="text-[11px] font-semibold text-slate-600 block">
-                  {activeShift === 'turno1'
-                    ? 'Horario habitual 07:00 a 15:00 hrs — Cambia a Turno 2 cuando hagan relevo temprano'
-                    : 'Horario habitual 15:00 a 22:00 hrs — Ventas asignadas a la tarde'}
-                </span>
-              </div>
+                {activeShift === 'turno1' ? 'Turno 1 (Mañana)' : 'Turno 2 (Tarde)'}
+              </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Cashier Selector: Maggie, Angy, Amari, Gabo */}
-              <div className="flex items-center gap-1 bg-amber-100/80 p-1 rounded-2xl border border-amber-300">
-                <span className="text-[10px] font-black text-amber-950 px-1.5 uppercase flex items-center gap-1">
-                  <User className="w-3.5 h-3.5 text-[#D95D39]" />
-                  <span>Caja:</span>
-                </span>
-                {cashierPresets.map((name) => {
-                  const isSelected = activeCashier === name;
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      id={`pos-cashier-btn-${name.toLowerCase()}`}
-                      onClick={() => {
-                        playBeep(650, 'sine', 0.03);
-                        setActiveCashier(name);
-                        localStorage.setItem('santafe_last_cashier_name', name);
-                      }}
-                      className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border active:scale-95 ${
-                        isSelected
-                          ? 'bg-[#D95D39] text-white border-[#b84a29] shadow-xs ring-2 ring-orange-300'
-                          : 'bg-white/90 hover:bg-white text-slate-700 border-amber-200'
-                      }`}
-                      title={`Registrar ventas a nombre de ${name}`}
-                    >
-                      {name}
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Switch Buttons: Delgados y Táctiles */}
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+              <button
+                id="shift-switch-turno1-btn"
+                type="button"
+                onClick={() => handleToggleShift('turno1')}
+                className={`px-3 py-1 rounded-md font-black text-xs transition-all cursor-pointer ${
+                  activeShift === 'turno1'
+                    ? 'bg-amber-500 text-amber-950 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Activar Turno 1 (Mañana)"
+              >
+                🌅 Turno 1
+              </button>
 
-              {/* Switch Buttons */}
-              <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-2xl border border-slate-300">
-                <button
-                  id="shift-switch-turno1-btn"
-                  type="button"
-                  onClick={() => handleToggleShift('turno1')}
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-black text-xs transition-all duration-150 flex items-center gap-1.5 cursor-pointer active:scale-95 ${
-                    activeShift === 'turno1'
-                      ? 'bg-amber-500 text-amber-950 shadow-md ring-2 ring-amber-600 font-black'
-                      : 'bg-transparent text-slate-700 hover:text-slate-950 hover:bg-white/60'
-                  }`}
-                  title="Activar Turno 1 (Mañana) para registrar ventas"
-                >
-                  <span>🌅 T1</span>
-                  {activeShift === 'turno1' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-950 animate-pulse"></span>
-                  )}
-                </button>
-
-                <button
-                  id="shift-switch-turno2-btn"
-                  type="button"
-                  onClick={() => handleToggleShift('turno2')}
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-black text-xs transition-all duration-150 flex items-center gap-1.5 cursor-pointer active:scale-95 ${
-                    activeShift === 'turno2'
-                      ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-700 font-black'
-                      : 'bg-transparent text-slate-700 hover:text-slate-950 hover:bg-white/60'
-                  }`}
-                  title="Activar Turno 2 (Tarde) para registrar ventas"
-                >
-                  <span>🌇 T2</span>
-                  {activeShift === 'turno2' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                  )}
-                </button>
-              </div>
+              <button
+                id="shift-switch-turno2-btn"
+                type="button"
+                onClick={() => handleToggleShift('turno2')}
+                className={`px-3 py-1 rounded-md font-black text-xs transition-all cursor-pointer ${
+                  activeShift === 'turno2'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Activar Turno 2 (Tarde)"
+              >
+                🌇 Turno 2
+              </button>
             </div>
           </div>
 
-          {/* 1. Multiplier Selector Bar (Tablet Touch Optimized - Compact & Fast) */}
-          <div className="bg-white rounded-2xl p-2.5 sm:p-3 shadow-xs border border-[#E5E1DA]">
-            <div className="flex items-center justify-between mb-1.5">
+          {/* 1. Multiplier Selector Bar (Tablet Touch Optimized - Larger & Wide across screen) */}
+          <div className="bg-white rounded-xl p-2 shadow-xs border border-[#E5E1DA]">
+            <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#D95D39] inline-block"></span>
+                <span className="w-2 h-2 rounded-full bg-[#D95D39] inline-block"></span>
                 Paso 1: Cantidad de Piezas
               </span>
-              <span className="text-[11px] font-bold text-[#D95D39] bg-[#FFF5F0] px-2 py-0.5 rounded-full border border-[#E5E1DA]">
-                Multiplicador: <strong className="text-xs text-[#D95D39]">{selectedMultiplier}</strong> {selectedMultiplier === 1 ? 'pza' : 'pzs'}
+              <span className="text-[11px] font-bold text-[#D95D39] bg-[#FFF5F0] px-2 py-0.2 rounded-full border border-[#E5E1DA]">
+                Multiplicador: <strong className="text-xs text-[#D95D39] font-mono">{selectedMultiplier}</strong> {selectedMultiplier === 1 ? 'pza' : 'pzs'}
               </span>
             </div>
 
-            {/* Quick 1 to 10 + Botón Manual / Teclado Virtual en el mismo estilo que Precios */}
+            {/* Quick 1 to 10 + Botón Manual / Teclado Virtual (Más grandes a lo largo de la pantalla) */}
             <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-11 gap-1.5 sm:gap-2">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
                 const isSelected = selectedMultiplier === num && !customMultiplierInput;
@@ -1300,14 +1311,14 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                       setSelectedMultiplier(num);
                       setCustomMultiplierInput('');
                     }}
-                    className={`h-14 sm:h-16 lg:h-18 rounded-2xl font-black text-2xl sm:text-3xl lg:text-4xl font-mono flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs cursor-pointer ${
+                    className={`h-[75px] sm:h-[80px] lg:h-[84px] rounded-xl font-black text-2xl sm:text-3xl lg:text-4xl font-mono flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs cursor-pointer ${
                       isSelected
-                        ? 'bg-[#D95D39] text-white shadow-md shadow-[#D95D3940] ring-4 ring-[#D95D39]/40 scale-102 z-10'
+                        ? 'bg-[#D95D39] text-white shadow-md shadow-[#D95D3940] ring-2 ring-[#D95D39]/40 z-10'
                         : 'bg-[#FAF8F6] hover:bg-[#FFF5F0] text-slate-950 border-2 border-[#E5E1DA] hover:border-[#D95D39]'
                     }`}
                   >
                     <span className="leading-none">{num}</span>
-                    <span className={`text-[10px] sm:text-xs font-black leading-none mt-0.5 ${isSelected ? 'text-white/95' : 'text-slate-600'}`}>
+                    <span className={`text-[10px] sm:text-xs font-bold leading-none mt-1 ${isSelected ? 'text-white/95' : 'text-slate-600'}`}>
                       {num === 1 ? 'pza' : 'pzs'}
                     </span>
                   </button>
@@ -1323,126 +1334,49 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   setNumpadValue(selectedMultiplier > 10 ? selectedMultiplier.toString() : '');
                   setShowNumpadModal(true);
                 }}
-                className={`border-2 rounded-2xl p-1 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs h-14 sm:h-16 lg:h-18 cursor-pointer ${
+                className={`border-2 rounded-xl p-0.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs h-[75px] sm:h-[80px] lg:h-[84px] cursor-pointer ${
                   selectedMultiplier > 10 || customMultiplierInput !== ''
-                    ? 'bg-[#D95D39] text-white border-[#D95D39] ring-4 ring-[#D95D39]/40'
+                    ? 'bg-[#D95D39] text-white border-[#D95D39] ring-2 ring-[#D95D39]/40'
                     : 'bg-[#FFF5F0] hover:bg-[#FFEAE0] border-dashed border-[#D95D39] hover:border-[#D95D39] text-[#D95D39]'
                 }`}
                 title="Abrir teclado virtual en pantalla para ingresar cualquier cantidad de piezas"
               >
                 <Plus className="w-5 h-5 stroke-[2.5]" />
                 <span className="text-xs sm:text-sm font-black uppercase tracking-tight leading-none mt-0.5">
-                  {selectedMultiplier > 10 ? `${selectedMultiplier} pzs` : 'Otro'}
+                  {selectedMultiplier > 10 ? `${selectedMultiplier}p` : 'Otro'}
                 </span>
-                <span className={`text-[9px] sm:text-[10px] font-black leading-none mt-0.5 ${selectedMultiplier > 10 ? 'text-white/95' : 'text-slate-700'}`}>
-                  {selectedMultiplier > 10 ? 'Manual' : 'Teclado'}
+                <span className={`text-[9px] sm:text-[10px] font-bold leading-none mt-0.5 ${selectedMultiplier > 10 ? 'text-white/95' : 'text-slate-700'}`}>
+                  Teclado
                 </span>
               </button>
-            </div>
-
-            {/* Quick Multiplier Badges (Cantidades frecuentes desde 11 en adelante en una fila limpia horizontal) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto py-1.5 mt-2 pt-2 border-t-2 border-[#E5E1DA] no-scrollbar">
-              <span className="text-xs font-black uppercase text-slate-700 shrink-0 mr-1">
-                Más de 10:
-              </span>
-              {[11, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100].map((qty) => (
-                <button
-                  key={qty}
-                  type="button"
-                  onClick={() => {
-                    playBeep(600, 'sine', 0.04);
-                    setSelectedMultiplier(qty);
-                    setCustomMultiplierInput(qty.toString());
-                  }}
-                  className={`px-3 py-1 rounded-xl text-xs sm:text-sm font-black font-mono transition-all cursor-pointer shrink-0 active:scale-95 border-2 ${
-                    selectedMultiplier === qty
-                      ? 'bg-[#D95D39] text-white border-[#D95D39] ring-2 ring-[#D95D39] shadow-xs'
-                      : 'bg-[#FAF8F6] text-slate-800 hover:bg-[#FFF5F0] hover:text-[#D95D39] border-[#E5E1DA]'
-                  }`}
-                >
-                  {qty} pzs
-                </button>
-              ))}
             </div>
           </div>
 
           {/* 2. Fast Preset Price Grid (Precios de Pan) + Clientes Preferentes + Acompañamientos & Lácteos */}
-          <div className="bg-white rounded-2xl p-2.5 sm:p-3 shadow-xs border border-[#E5E1DA] space-y-2">
+          <div className="bg-white rounded-xl p-2 sm:p-2.5 shadow-xs border border-[#E5E1DA] space-y-1.5">
             
-            {/* Step 2 Header with Preferente Toggle */}
-            <div className="flex flex-wrap items-center justify-between gap-1.5">
+            {/* Step 2 Header */}
+            <div className="flex flex-wrap items-center justify-between gap-1">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900">
                   Paso 2: Toca el Pan o Acompañamiento
                 </span>
               </div>
-              <div className="flex items-center gap-1.5">
-                {/* Botón de Descuento 10% para Clientes Especiales (Sucursal Zakia) */}
-                <button
-                  id="toggle-special-discount-btn"
-                  type="button"
-                  onClick={() => {
-                    playBeep(isSpecialCustomerDiscount ? 450 : 750, 'triangle', 0.05);
-                    setIsSpecialCustomerDiscount(!isSpecialCustomerDiscount);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer border shadow-xs active:scale-95 ${
-                    isSpecialCustomerDiscount
-                      ? 'bg-amber-500 text-amber-950 border-amber-600 ring-2 ring-amber-400 font-black'
-                      : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
-                  }`}
-                  title="Aplicar o remover 10% de descuento para clientes especiales de la sucursal"
-                >
-                  <Star className={`w-3.5 h-3.5 ${isSpecialCustomerDiscount ? 'fill-amber-950 text-amber-950' : 'fill-amber-600 text-amber-700'}`} />
-                  <span>{isSpecialCustomerDiscount ? '⭐ 10% Especial: APLICADO' : '⭐ Descuento 10% Cliente Especial'}</span>
-                </button>
-
-                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                  +{selectedMultiplier} {selectedMultiplier === 1 ? 'pza' : 'pzs'}
-                </span>
-              </div>
+              <span className="text-[11px] font-black text-emerald-900 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-full font-mono">
+                +{selectedMultiplier} {selectedMultiplier === 1 ? 'pieza' : 'piezas'}
+              </span>
             </div>
 
-            {/* BANNER INFORMATIVO: DESCUENTO 10% CLIENTE ESPECIAL ACTIVO */}
-            {isSpecialCustomerDiscount && (
-              <div className="p-2.5 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 rounded-2xl border-2 border-amber-400 shadow-xs flex flex-wrap items-center justify-between gap-2 animate-in fade-in slide-in-from-top-1 duration-150">
-                <div className="flex items-center gap-2">
-                  <Star className="w-4 h-4 fill-amber-500 text-amber-700 shrink-0 animate-bounce" />
-                  <div>
-                    <span className="text-xs font-black text-amber-950 uppercase tracking-wide mr-1.5">
-                      ⭐ Descuento del 10% para Cliente Especial Activo:
-                    </span>
-                    <span className="text-xs text-amber-900 font-bold">
-                      Se descuenta el 10% automáticamente sobre todos los panes y productos del ticket.
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {subtotal > 0 && (
-                    <span className="text-xs font-black bg-amber-200/90 text-amber-950 px-2.5 py-1 rounded-xl font-mono border border-amber-400 shadow-2xs">
-                      Ahorro cliente: -${specialCustomerDiscount.toFixed(2)}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setIsSpecialCustomerDiscount(false)}
-                    className="text-[11px] font-black text-amber-900 hover:text-amber-950 px-2 py-1 bg-white/80 hover:bg-white rounded-lg border border-amber-300 cursor-pointer"
-                  >
-                    Quitar Descuento
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* SECCIÓN 1: Precios de Pan (5, 6.50, 8, 12, 15, 18, 20, 25, 30, 35) */}
+            {/* SECCIÓN 1: Precios de Pan en 2 Filas de 5 Botones (Fila 1: $5 a $18 | Fila 2: $20 a $35 y Otro Manual) */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
-                  <span className="text-base">🥖</span> Precios de Pan:
+                <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-950 flex items-center gap-1">
+                  <span>🥖</span> Precios de Pan:
                 </span>
-                <span className="text-xs text-slate-600 font-bold">Piezas de mostrador</span>
+                <span className="text-[11px] text-slate-500 font-bold">Mostrador</span>
               </div>
-              <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-11 gap-1.5 sm:gap-2">
+              <div className="grid grid-cols-5 gap-2 sm:gap-2.5">
                 {quickPrices.map((price) => {
                   const prod = products.find(p => p.price === price);
                   const displayPrice = price === 6.5 ? '$6.50' : `$${price}`;
@@ -1452,21 +1386,21 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                       id={`price-btn-${price}`}
                       type="button"
                       onClick={() => handleAddPrice(price, `Pan ${displayPrice}`, prod?.id)}
-                      className="group relative bg-[#FAF8F6] hover:bg-[#FFF5F0] border-2 border-[#E5E1DA] hover:border-[#D95D39] rounded-2xl p-1 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 lg:h-20 cursor-pointer"
+                      className="group relative bg-[#FAF8F6] hover:bg-[#FFF5F0] border-2 border-[#E5E1DA] hover:border-[#D95D39] rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-2xs hover:shadow-xs h-16 sm:h-18 lg:h-20 cursor-pointer"
                     >
-                      <div className="absolute top-1 left-1.5">
-                        <span className="bg-white text-slate-800 px-1.5 py-0.5 rounded-md text-[10px] sm:text-xs border border-[#E5E1DA] font-black shadow-2xs font-mono">
+                      <div className="absolute top-1.5 left-2">
+                        <span className="bg-white text-slate-700 px-1.5 py-0.2 rounded-md text-[10px] sm:text-[11px] border border-[#E5E1DA] font-bold font-mono shadow-2xs">
                           +{selectedMultiplier}
                         </span>
                       </div>
 
-                      <div className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-950 group-hover:text-[#D95D39] tracking-tight leading-none mt-2 font-mono">
+                      <div className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-950 group-hover:text-[#D95D39] tracking-tight leading-none mt-1 font-mono">
                         {displayPrice}
                       </div>
 
                       {/* Live total badge preview when multiplier > 1 */}
                       {selectedMultiplier > 1 && (
-                        <div className="absolute -top-2 -right-2 bg-[#D95D39] text-white text-xs font-black px-2 py-0.5 rounded-full shadow-md border-2 border-white font-mono z-10">
+                        <div className="absolute -top-1.5 -right-1 bg-[#D95D39] text-white text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-xs border border-white font-mono z-10">
                           =${price === 6.5 ? (selectedMultiplier * price).toFixed(2) : selectedMultiplier * price}
                         </div>
                       )}
@@ -1474,54 +1408,62 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   );
                 })}
 
-                {/* Manual Custom Price Button */}
+                {/* Manual Custom Price Button en la 2da Fila, posición 5 */}
                 <button
                   id="custom-price-btn"
                   type="button"
                   onClick={() => setShowCustomPriceModal(true)}
-                  className="bg-[#FFF5F0] hover:bg-[#FFEAE0] border-2 border-dashed border-[#D95D39] hover:border-[#D95D39] rounded-2xl p-1 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 text-[#D95D39] shadow-xs h-16 sm:h-18 lg:h-20 cursor-pointer"
+                  className="bg-[#FFF5F0] hover:bg-[#FFEAE0] border-2 border-dashed border-[#D95D39] hover:border-[#D95D39] rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 text-[#D95D39] shadow-2xs h-16 sm:h-18 lg:h-20 cursor-pointer"
+                  title="Precio libre manual"
                 >
-                  <Plus className="w-5 h-5 text-[#D95D39] stroke-[2.5]" />
-                  <span className="text-xs font-black uppercase tracking-tight leading-none mt-0.5">Otro</span>
-                  <span className="text-[10px] text-slate-700 font-bold leading-none mt-0.5">Manual</span>
+                  <Plus className="w-6 h-6 text-[#D95D39] stroke-[2.8]" />
+                  <span className="text-xs sm:text-sm font-black uppercase tracking-tight leading-none mt-0.5 text-[#D95D39]">
+                    OTRO
+                  </span>
+                  <span className="text-[10px] sm:text-[11px] text-slate-700 font-bold leading-none mt-0.5">
+                    Manual
+                  </span>
                 </button>
               </div>
             </div>
 
-            {/* SECCIÓN 2: Acompañamientos, Lácteos y Postres (NO ES PAN) */}
-            <div className="pt-2 border-t-2 border-dashed border-sky-200">
-              <div className="flex items-center justify-between mb-1.5">
+            {/* SECCIÓN 2: Acompañamientos, Lácteos y Postres (NO ES PAN - DELGADOS EN 1 SOLA FILA) */}
+            <div className="pt-1.5 border-t-2 border-dashed border-sky-200">
+              <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block animate-pulse"></span>
+                  <span className="w-2 h-2 rounded-full bg-sky-500 inline-block animate-pulse"></span>
                   <span className="text-xs font-black uppercase tracking-wider text-sky-950">
                     Acompañamientos, Lácteos & Postres
                   </span>
-                  <span className="text-[9px] bg-sky-100 text-sky-800 font-black px-2 py-0.5 rounded-md border border-sky-300">
+                  <span className="text-[9px] bg-sky-100 text-sky-800 font-bold px-1.5 py-0.2 rounded border border-sky-300">
                     No es Pan
                   </span>
                 </div>
-                <span className="text-xs font-bold text-sky-800 font-mono">
+                <span className="text-[11px] font-bold text-sky-800 font-mono">
                   Toque directo (+{selectedMultiplier})
                 </span>
               </div>
 
-              {/* Botones Claros y Táctiles para Acompañamientos, Granola y Postres */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2">
+              {/* Botones Delgados en 1 sola fila: Leche, Lechita, Nata, Queso, Postres, Charola */}
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
                 {/* 1. Leche 35 */}
                 <button
                   id="companion-btn-p_leche"
                   type="button"
                   onClick={() => handleAddPrice(35, 'Leche 1L $35', 'p_leche')}
-                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-xl px-1.5 py-1 flex items-center justify-between transition-all duration-150 active:scale-95 shadow-2xs h-10 sm:h-11 cursor-pointer"
+                  title="Leche 1L $35"
                 >
-                  <div className="absolute top-1 left-1.5 text-sm">🥛</div>
-                  <div className="absolute top-1 right-1.5">
-                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-extrabold shadow-2xs font-mono">
-                      +{selectedMultiplier}
-                    </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-base shrink-0">🥛</span>
+                    <div className="text-left leading-none truncate">
+                      <div className="text-xs font-black text-sky-950 truncate">LECHE</div>
+                      <div className="text-[10px] font-bold text-sky-700 leading-none mt-0.5">1L · $35</div>
+                    </div>
                   </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-sky-950 leading-tight">LECHE $35</div>
-                  <div className="text-[9px] font-extrabold text-sky-700 leading-none mt-0.5">1 Litro</div>
+                  <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-bold font-mono shrink-0 ml-0.5">
+                    +{selectedMultiplier}
+                  </span>
                 </button>
 
                 {/* 2. Lechita 18 */}
@@ -1529,16 +1471,19 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   id="companion-btn-p_lechita"
                   type="button"
                   onClick={() => handleAddPrice(18, 'Lechita $18', 'p_lechitas_18')}
-                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-xl px-1.5 py-1 flex items-center justify-between transition-all duration-150 active:scale-95 shadow-2xs h-10 sm:h-11 cursor-pointer"
+                  title="Lechita $18"
                 >
-                  <div className="absolute top-1 left-1.5 text-sm">🧃</div>
-                  <div className="absolute top-1 right-1.5">
-                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-extrabold shadow-2xs font-mono">
-                      +{selectedMultiplier}
-                    </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-base shrink-0">🧃</span>
+                    <div className="text-left leading-none truncate">
+                      <div className="text-xs font-black text-sky-950 truncate">LECHITA</div>
+                      <div className="text-[10px] font-bold text-sky-700 leading-none mt-0.5">Sabor · $18</div>
+                    </div>
                   </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-sky-950 leading-tight">LECHITA $18</div>
-                  <div className="text-[9px] font-extrabold text-sky-700 leading-none mt-0.5">Sabor</div>
+                  <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-bold font-mono shrink-0 ml-0.5">
+                    +{selectedMultiplier}
+                  </span>
                 </button>
 
                 {/* 3. Nata 90 */}
@@ -1546,16 +1491,19 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   id="companion-btn-p_nata"
                   type="button"
                   onClick={() => handleAddPrice(90, 'Nata $90', 'p_nata')}
-                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-xl px-1.5 py-1 flex items-center justify-between transition-all duration-150 active:scale-95 shadow-2xs h-10 sm:h-11 cursor-pointer"
+                  title="Nata $90"
                 >
-                  <div className="absolute top-1 left-1.5 text-sm">🍶</div>
-                  <div className="absolute top-1 right-1.5">
-                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-extrabold shadow-2xs font-mono">
-                      +{selectedMultiplier}
-                    </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-base shrink-0">🍶</span>
+                    <div className="text-left leading-none truncate">
+                      <div className="text-xs font-black text-sky-950 truncate">NATA</div>
+                      <div className="text-[10px] font-bold text-sky-700 leading-none mt-0.5">Artesanal · $90</div>
+                    </div>
                   </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-sky-950 leading-tight">NATA $90</div>
-                  <div className="text-[9px] font-extrabold text-sky-700 leading-none mt-0.5">Artesanal</div>
+                  <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-bold font-mono shrink-0 ml-0.5">
+                    +{selectedMultiplier}
+                  </span>
                 </button>
 
                 {/* 4. Queso 150 */}
@@ -1563,37 +1511,22 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   id="companion-btn-p_queso"
                   type="button"
                   onClick={() => handleAddPrice(150, 'Queso $150', 'p_queso')}
-                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  className="group relative bg-gradient-to-b from-sky-50 to-white hover:from-sky-100 hover:to-sky-50 border-2 border-sky-300 hover:border-sky-600 rounded-xl px-1.5 py-1 flex items-center justify-between transition-all duration-150 active:scale-95 shadow-2xs h-10 sm:h-11 cursor-pointer"
+                  title="Queso $150"
                 >
-                  <div className="absolute top-1 left-1.5 text-sm">🧀</div>
-                  <div className="absolute top-1 right-1.5">
-                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-extrabold shadow-2xs font-mono">
-                      +{selectedMultiplier}
-                    </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-base shrink-0">🧀</span>
+                    <div className="text-left leading-none truncate">
+                      <div className="text-xs font-black text-sky-950 truncate">QUESO</div>
+                      <div className="text-[10px] font-bold text-sky-700 leading-none mt-0.5">Rancho · $150</div>
+                    </div>
                   </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-sky-950 leading-tight">QUESO $150</div>
-                  <div className="text-[9px] font-extrabold text-sky-700 leading-none mt-0.5">Rancho</div>
+                  <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-sky-200 font-bold font-mono shrink-0 ml-0.5">
+                    +{selectedMultiplier}
+                  </span>
                 </button>
 
-                {/* 5. Granola 150 */}
-                <button
-                  id="companion-btn-p_granola"
-                  type="button"
-                  onClick={() => handleAddPrice(150, 'Granola $150', 'p_granola_150')}
-                  className="group relative bg-gradient-to-b from-amber-50 to-white hover:from-amber-100 hover:to-amber-50 border-2 border-amber-300 hover:border-amber-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
-                  title="Granola en $150"
-                >
-                  <div className="absolute top-1 left-1.5 text-sm">🥣</div>
-                  <div className="absolute top-1 right-1.5">
-                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-amber-200 font-extrabold shadow-2xs font-mono">
-                      +{selectedMultiplier}
-                    </span>
-                  </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-amber-950 leading-tight">GRANOLA $150</div>
-                  <div className="text-[9px] font-extrabold text-amber-700 leading-none mt-0.5">Artesanal</div>
-                </button>
-
-                {/* 6. POSTRES (Desplegable Gelatina 20 y Arroz con Leche 25) */}
+                {/* 5. POSTRES (Desplegable Gelatina 20 y Arroz con Leche 25) */}
                 <button
                   id="companion-btn-postres-dropdown"
                   type="button"
@@ -1601,238 +1534,188 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                     playBeep(750, 'sine', 0.04);
                     setShowPostresModal(true);
                   }}
-                  className="group relative bg-gradient-to-b from-pink-50 to-rose-100 hover:from-pink-100 hover:to-rose-200 border-2 border-pink-300 hover:border-pink-500 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  className="group relative bg-gradient-to-b from-pink-50 to-rose-100 hover:from-pink-100 hover:to-rose-200 border-2 border-pink-300 hover:border-pink-500 rounded-xl px-1.5 py-1 flex items-center justify-between transition-all duration-150 active:scale-95 shadow-2xs h-10 sm:h-11 cursor-pointer"
                   title="Toca para elegir Postres: Gelatina $20 o Arroz con Leche $25"
                 >
-                  <div className="absolute top-1 left-1.5 text-sm">🍮</div>
-                  <div className="absolute top-1 right-1.5">
-                    <ChevronDown className="w-3.5 h-3.5 text-pink-800 group-hover:translate-y-0.5 transition-transform" />
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-base shrink-0">🍮</span>
+                    <div className="text-left leading-none truncate">
+                      <div className="text-xs font-black text-pink-950 truncate">POSTRES</div>
+                      <div className="text-[10px] font-bold text-pink-800 leading-none mt-0.5">$20 · $25</div>
+                    </div>
                   </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-pink-950 leading-tight">POSTRES</div>
-                  <div className="text-[9px] font-black text-pink-900 leading-none bg-pink-200/90 px-1.5 py-0.5 rounded-md mt-0.5 font-mono">
-                    $20 · $25
-                  </div>
+                  <ChevronDown className="w-3.5 h-3.5 text-pink-800 shrink-0 group-hover:translate-y-0.5 transition-transform ml-0.5" />
                 </button>
 
-                {/* 7. CHAROLA / DOMO 25 (Charola de Domo para transportar pan) */}
+                {/* 6. CHAROLA / DOMO 25 (Charola de Domo para transportar pan) */}
                 <button
                   id="companion-btn-domo-25"
                   type="button"
                   onClick={() => handleAddPrice(25, 'Charola / Domo $25', 'p_domo_25')}
-                  className="group relative bg-gradient-to-b from-amber-50 to-orange-100 hover:from-amber-100 hover:to-orange-200 border-2 border-amber-400 hover:border-amber-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
+                  className="group relative bg-gradient-to-b from-amber-50 to-orange-100 hover:from-amber-100 hover:to-orange-200 border-2 border-amber-400 hover:border-amber-600 rounded-xl px-1.5 py-1 flex items-center justify-between transition-all duration-150 active:scale-95 shadow-2xs h-10 sm:h-11 cursor-pointer"
                   title="Charola / Domo para empaque"
                 >
-                  <div className="absolute top-1 left-1.5 text-sm">🍱</div>
-                  <div className="absolute top-1 right-1.5">
-                    <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-amber-300 font-extrabold shadow-2xs font-mono">
-                      +{selectedMultiplier}
-                    </span>
-                  </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-amber-950 leading-tight">CHAROLA $25</div>
-                  <div className="text-[9px] font-extrabold text-amber-800 leading-none truncate mt-0.5">Domo Empaque</div>
-                  {selectedMultiplier > 1 && (
-                    <div className="absolute -top-2 -right-2 bg-amber-600 text-white text-xs font-black px-1.5 py-0.5 rounded-full shadow-md border-2 border-white font-mono">
-                      =${selectedMultiplier * 25}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-base shrink-0">🍱</span>
+                    <div className="text-left leading-none truncate">
+                      <div className="text-xs font-black text-amber-950 truncate">DOMO</div>
+                      <div className="text-[10px] font-bold text-amber-800 leading-none mt-0.5">Charola · $25</div>
                     </div>
-                  )}
+                  </div>
+                  <span className="bg-white text-slate-800 px-1 py-0.2 rounded text-[8px] border border-amber-300 font-bold font-mono shrink-0 ml-0.5">
+                    +{selectedMultiplier}
+                  </span>
                 </button>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* CLUB DE PUNTOS SANTA FÉ (Directamente en la pantalla principal en lugar del catálogo) */}
-          <div className="bg-gradient-to-r from-amber-50/90 via-orange-50/70 to-amber-100/80 rounded-2xl p-3 shadow-xs border-2 border-amber-300">
-            <div className="flex items-center justify-between gap-1.5 mb-2">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-[#D95D39] text-white flex items-center justify-center shadow-xs shrink-0 font-bold">
-                  <Gift className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h3 className="text-xs sm:text-sm font-black text-amber-950 leading-tight">
-                      ⭐ Club de Puntos Santa Fé
-                    </h3>
-                    <span className="text-[9px] font-black bg-amber-200 text-amber-950 border border-amber-400 px-1.5 py-0.2 rounded-full shadow-2xs">
-                      $20 = 1 Punto
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-amber-800 font-semibold">
-                    Registra o busca por teléfono para acumular o canjear
-                  </p>
-                </div>
-              </div>
-
-              {selectedCustomer && (
-                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
-                  Cliente Activo
-                </span>
-              )}
-            </div>
-
-            {/* Customer Lookup or Selected Customer */}
+        {/* RIGHT COLUMN: Club de Puntos + Live Ticket Preview + Checkout (42% width, col-span-5) */}
+        <div className="lg:col-span-5 space-y-1.5 lg:sticky lg:top-16 z-20 self-start">
+          
+          {/* 1. CLUB DE PUNTOS SANTA FÉ (Barra delgada compacta para ahorrar espacio - Solo Teléfono) */}
+          <div className="bg-gradient-to-r from-amber-50 via-orange-50/60 to-amber-100/70 rounded-xl px-2 py-1 shadow-2xs border border-amber-300">
             {selectedCustomer ? (
-              <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border-2 border-emerald-400 shadow-xs">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-4 h-4" />
-                  </div>
-                  <div className="truncate">
-                    <div className="text-xs sm:text-sm font-black text-slate-900 truncate flex items-center gap-1.5">
-                      <span>{selectedCustomer.name}</span>
-                      <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded font-bold">
-                        ⭐ {selectedCustomer.points} pts disponibles
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-xs shrink-0">⭐</span>
+                  <div className="truncate flex items-center gap-1.5">
+                    <span className="text-xs font-mono font-black text-slate-900 truncate">
+                      📱 Tel: {selectedCustomer.phone}
+                    </span>
+                    <span className="text-[10px] font-black bg-amber-200 text-amber-950 px-1.5 py-0.2 rounded border border-amber-400 font-mono shrink-0">
+                      {selectedCustomer.points} pts
+                    </span>
+                    {pointsEarned > 0 && (
+                      <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300 font-mono shrink-0">
+                        +{pointsEarned} pts ganados
                       </span>
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-semibold">Tel: {selectedCustomer.phone}</div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCustomer(null);
-                      setPhoneSearch('');
-                      setPointsToRedeem(0);
-                    }}
-                    className="text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 px-2 py-1 rounded-lg border border-slate-200 text-xs font-bold transition-colors cursor-pointer"
-                    title="Cambiar o quitar cliente"
-                  >
-                    ✕ Cambiar
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setPhoneSearch('');
+                    setVirtualPhoneInput('');
+                    setPointsToRedeem(0);
+                  }}
+                  className="text-slate-500 hover:text-rose-600 bg-white hover:bg-rose-50 px-2 py-0.5 rounded-md border border-slate-200 text-[10px] font-bold transition-colors cursor-pointer shrink-0"
+                  title="Cambiar cliente"
+                >
+                  ✕ Cambiar
+                </button>
               </div>
             ) : (
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="relative flex-1">
-                    <Phone className="w-3.5 h-3.5 text-amber-700 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <div>
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-xs">⭐</span>
+                    <span className="text-[11px] font-black uppercase tracking-tight text-amber-950">Club Puntos:</span>
+                    <span className="hidden sm:inline-block text-[9px] font-bold text-amber-800 bg-amber-200/80 px-1 py-0.2 rounded border border-amber-300 font-mono">
+                      $20=1pt
+                    </span>
+                  </div>
+
+                  <div 
+                    onClick={() => {
+                      setVirtualPhoneInput(phoneSearch);
+                      setShowCustomerPhoneKeyboardModal(true);
+                    }}
+                    className="relative flex-1 max-w-[210px] cursor-pointer"
+                    title="Toca para abrir teclado virtual"
+                  >
+                    <Phone className="w-3 h-3 text-amber-700 absolute left-2 top-1/2 -translate-y-1/2" />
                     <input
                       id="customer-phone-search"
                       type="tel"
-                      placeholder="Escribe el teléfono del cliente (10 dígitos)..."
+                      placeholder="Teléfono (10 dígitos)..."
                       value={phoneSearch}
-                      onChange={(e) => setPhoneSearch(e.target.value)}
-                      className="w-full bg-white pl-8 pr-3 py-2 rounded-xl text-xs sm:text-sm border-2 border-amber-300 focus:outline-none focus:ring-2 focus:ring-[#D95D39] focus:border-[#D95D39] font-bold text-slate-900 placeholder:text-slate-400 shadow-2xs"
+                      readOnly
+                      onClick={() => {
+                        setVirtualPhoneInput(phoneSearch);
+                        setShowCustomerPhoneKeyboardModal(true);
+                      }}
+                      className="w-full bg-white pl-5 pr-2 py-0.5 rounded-lg text-[11px] border border-amber-300 focus:outline-none font-bold text-slate-900 placeholder:text-slate-400 cursor-pointer"
                     />
                   </div>
+
+                  {/* Botón táctil para abrir teclado virtual */}
+                  <button
+                    id="open-phone-keyboard-btn"
+                    type="button"
+                    onClick={() => {
+                      setVirtualPhoneInput(phoneSearch);
+                      setShowCustomerPhoneKeyboardModal(true);
+                    }}
+                    className="bg-amber-400 hover:bg-amber-500 active:scale-95 text-amber-950 text-[10px] font-black px-2 py-0.5 rounded-lg border border-amber-500 flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                    title="Abrir teclado virtual en pantalla"
+                  >
+                    <Keyboard className="w-3 h-3" />
+                    <span>Teclado</span>
+                  </button>
+
                   {phoneSearch && (
                     <button
                       type="button"
                       onClick={() => {
                         setPhoneSearch('');
+                        setVirtualPhoneInput('');
                         setSelectedCustomer(null);
                         setShowNewCustomerForm(false);
                       }}
-                      className="text-xs text-slate-600 hover:text-slate-900 px-2.5 py-2 bg-white rounded-xl font-bold border border-amber-300 shrink-0 cursor-pointer"
+                      className="text-[10px] text-slate-600 hover:text-slate-900 px-1.5 py-0.5 bg-white rounded-md font-bold border border-amber-300 shrink-0 cursor-pointer"
                     >
-                      ✕ Borrar
+                      ✕
                     </button>
                   )}
                 </div>
 
-                {/* New Customer Inline registration box if searched and not found */}
+                {/* Afiliación rápida táctil sin pedir nombre si el teléfono no está registrado */}
                 {showNewCustomerForm && !selectedCustomer && (
-                  <div className="pt-2 border-t border-amber-200 bg-white p-2.5 rounded-xl space-y-2 border border-amber-300 animate-in fade-in">
-                    <div className="flex items-center justify-between text-slate-900">
-                      <div className="flex items-center gap-1.5 font-black text-xs text-amber-950">
-                        <UserPlus className="w-4 h-4 text-[#D95D39] shrink-0" />
-                        <span>Cliente no registrado con {phoneSearch}. ¿Deseas afiliarlo ahora?</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowNewCustomerForm(false)}
-                        className="text-slate-400 hover:text-slate-700 text-xs px-1 font-bold cursor-pointer"
-                      >
-                        ✕
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        id="new-customer-name-input"
-                        type="text"
-                        placeholder="Nombre completo del cliente..."
-                        value={newCustomerName}
-                        onChange={(e) => setNewCustomerName(e.target.value)}
-                        className="flex-1 bg-[#FAF8F6] px-3 py-1.5 text-xs sm:text-sm rounded-xl border border-slate-300 font-bold focus:ring-2 focus:ring-[#D95D39] outline-none text-slate-800"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleCreateCustomer();
-                          }
-                        }}
-                      />
-                      <button
-                        id="register-customer-btn"
-                        type="button"
-                        onClick={handleCreateCustomer}
-                        className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] hover:from-[#BF4C2A] hover:to-[#9E3B1C] text-white text-xs font-black px-3.5 py-2 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Afiliar Cliente</span>
-                      </button>
-                    </div>
+                  <div className="mt-1 pt-1 border-t border-amber-200 flex items-center justify-between gap-1.5 animate-in fade-in">
+                    <span className="text-[10px] font-bold text-amber-950 truncate">
+                      Teléfono: <strong className="font-mono">{phoneSearch}</strong>
+                    </span>
+                    <button
+                      id="register-customer-btn"
+                      type="button"
+                      onClick={() => handleRegisterOrSelectPhone(phoneSearch)}
+                      className="bg-[#D95D39] hover:bg-[#BF4C2A] active:scale-95 text-white text-[11px] font-black px-2.5 py-0.5 rounded-md shadow-2xs transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Afiliar Teléfono</span>
+                    </button>
                   </div>
                 )}
               </div>
             )}
           </div>
-        </div>
 
-        {/* RIGHT COLUMN: Live Ticket directly at the Top & Sticky in View (col-span-4) */}
-        <div className="lg:col-span-4 space-y-2 lg:sticky lg:top-18 z-20 self-start">
-          <div className="bg-white rounded-2xl shadow-md border-2 border-[#E5E1DA] flex flex-col max-h-[calc(100vh-4.5rem)] overflow-y-auto">
+          {/* 2. PREVISUALIZACIÓN DEL PEDIDO EN VIVO + TOTAL Y COBRO */}
+          <div className="bg-white rounded-xl shadow-sm border border-[#E5E1DA] flex flex-col overflow-hidden">
             
-            {/* Ticket Header (Compact) */}
-            <div className="bg-[#2D3142] text-white px-3 py-1.5 flex items-center justify-between shadow-xs shrink-0">
-              <div className="flex items-center space-x-2">
-                <Printer className="w-4 h-4 text-[#FAF8F6]" />
-                <div>
-                  <h2 className="font-bold text-sm leading-tight">Ticket</h2>
-                  <span className="text-[10px] text-slate-300 font-medium">
-                    {totalPieces} piezas
+            {/* Header del Ticket Delgado */}
+            <div className="bg-[#2D3142] text-white px-2.5 py-1 flex items-center justify-between shadow-xs shrink-0">
+              <div className="flex items-center space-x-1.5">
+                <Printer className="w-3.5 h-3.5 text-[#FAF8F6]" />
+                <div className="flex items-center gap-1.5">
+                  <h2 className="font-bold text-xs sm:text-sm leading-tight">Previsualización del Pedido</h2>
+                  <span className="text-[11px] text-amber-300 font-black">
+                    ({totalPieces} piezas)
                   </span>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5">
-                {/* Active Shift Toggle Badge in Ticket Header */}
-                <button
-                  id="active-shift-ticket-badge-btn"
-                  type="button"
-                  onClick={() => handleToggleShift(activeShift === 'turno1' ? 'turno2' : 'turno1')}
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-black flex items-center gap-1 transition-all cursor-pointer border ${
-                    activeShift === 'turno1'
-                      ? 'bg-amber-500 hover:bg-amber-400 text-amber-950 border-amber-300'
-                      : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400'
-                  }`}
-                  title="Click para cambiar entre Turno 1 y Turno 2"
-                >
-                  <span>{activeShift === 'turno1' ? '🌅 T1' : '🌇 T2'}</span>
-                </button>
-
-                {/* Zettle Bluetooth Quick Status/Pair Button */}
-                <button
-                  id="zettle-header-bt-btn"
-                  type="button"
-                  onClick={handleQuickBluetoothPairing}
-                  disabled={isConnectingZettlePos}
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                    zettleDevice?.connected 
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
-                      : 'bg-blue-600/80 hover:bg-blue-600 text-white border border-blue-400'
-                  }`}
-                  title={zettleDevice?.connected ? `Terminal Zettle Conectada (${zettleDevice.name})` : 'Conectar Terminal PayPal Zettle por Bluetooth'}
-                >
-                  <Bluetooth className="w-3 h-3" />
-                  <span>{isConnectingZettlePos ? 'Buscando...' : zettleDevice?.connected ? 'Zettle OK' : 'Zettle BT'}</span>
-                </button>
-
                 {ticketItems.length > 0 && (
                   <button
                     id="clear-ticket-btn"
                     onClick={handleClearTicket}
-                    className="text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                    className="text-slate-200 hover:text-white bg-rose-500/30 hover:bg-rose-500/50 text-[10px] px-2 py-0.5 rounded-md flex items-center gap-1 font-bold transition-colors cursor-pointer border border-rose-400/40"
                     title="Limpiar todo el ticket"
                   >
                     <RotateCcw className="w-3 h-3" />
@@ -1842,61 +1725,66 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               </div>
             </div>
 
-            {/* Ticket Line Items List (Adaptive height with inner scrollbar) */}
-            <div className="p-2 flex-1 min-h-[60px] max-h-[140px] sm:max-h-[160px] overflow-y-auto space-y-1.5 bg-[#FAF8F6] border-b-2 border-[#E5E1DA]">
+            {/* Lista de partidas del Ticket (Compacta: 5 partidas caben en ~135px sin scroll) */}
+            <div className="p-1 flex-1 min-h-[50px] max-h-[145px] overflow-y-auto space-y-1 bg-[#FAF8F6] border-b border-[#E5E1DA]">
               {ticketItems.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center py-3 text-slate-400">
-                  <div className="w-9 h-9 rounded-full bg-[#FFF5F0] text-[#D95D39] flex items-center justify-center mb-1 font-bold text-base border border-[#E5E1DA]">
-                    🥖
-                  </div>
-                  <p className="font-black text-slate-800 text-sm">Ticket Vacío</p>
-                  <p className="text-xs text-slate-600 max-w-[200px] font-bold">
-                    Toca la cantidad y el precio para cobrar
+                <div className="h-full flex flex-col items-center justify-center text-center py-2 text-slate-400">
+                  <p className="font-black text-slate-800 text-xs">Sin piezas marcadas aún</p>
+                  <p className="text-[10px] text-slate-600 max-w-[240px] font-bold">
+                    Toca la cantidad y el precio del pan a la izquierda
                   </p>
                 </div>
               ) : (
                 ticketItems.map((item, idx) => (
                   <div
                     key={item.id}
-                    className="bg-white p-2 rounded-xl border-2 border-[#E5E1DA] shadow-xs flex items-center justify-between gap-2"
+                    className="bg-white px-2 py-0.5 rounded-md border border-[#E5E1DA] shadow-2xs flex items-center justify-between gap-1 hover:border-amber-300 transition-colors"
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline space-x-2">
-                        <span className="font-mono font-black text-base sm:text-lg text-slate-950">
-                          {item.quantity}x ${item.price} =
-                        </span>
-                        <span className="font-mono font-black text-lg sm:text-xl text-[#D95D39]">
-                          ${item.total}
+                    {/* Descripción & Cantidad */}
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                      <span className="font-mono font-black text-xs sm:text-sm text-slate-900 shrink-0">
+                        {item.quantity}×
+                      </span>
+                      <div className="truncate leading-tight">
+                        <span className="text-xs font-bold text-slate-800 truncate block">
+                          {item.name}
                         </span>
                       </div>
-                      <div className="text-xs font-bold text-slate-700 truncate leading-tight mt-0.5">
-                        {item.name}
-                      </div>
+                      <span className="font-mono font-bold text-[10px] text-slate-500 shrink-0">
+                        (@${item.price})
+                      </span>
                     </div>
 
-                    {/* Quantity Controls & Delete */}
-                    <div className="flex items-center space-x-1">
+                    {/* Subtotal Partida */}
+                    <span className="font-mono font-black text-xs sm:text-sm text-[#D95D39] shrink-0">
+                      ${item.total.toFixed(2)}
+                    </span>
+
+                    {/* Botones de incremento/decremento y borrado compactos */}
+                    <div className="flex items-center space-x-1 shrink-0">
                       <button
                         onClick={() => handleUpdateQuantity(idx, -1)}
-                        className="w-7 h-7 rounded-lg bg-[#FAF8F6] hover:bg-[#FFF5F0] text-slate-900 font-black flex items-center justify-center text-base active:scale-95 border-2 border-[#E5E1DA] cursor-pointer"
+                        className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center text-xs active:scale-95 border border-slate-300 cursor-pointer"
+                        title="Restar una pieza"
                       >
                         -
                       </button>
-                      <span className="w-6 text-center font-black font-mono text-sm sm:text-base text-slate-950">
+                      <span className="w-4 text-center font-black font-mono text-xs text-slate-900">
                         {item.quantity}
                       </span>
                       <button
                         onClick={() => handleUpdateQuantity(idx, 1)}
-                        className="w-7 h-7 rounded-lg bg-[#FFF5F0] hover:bg-[#FFEAE0] text-[#D95D39] font-black flex items-center justify-center text-base active:scale-95 border-2 border-[#D95D39]/40 cursor-pointer"
+                        className="w-5 h-5 rounded bg-[#FFF5F0] hover:bg-[#FFEAE0] text-[#D95D39] font-black flex items-center justify-center text-xs active:scale-95 border border-[#D95D39]/40 cursor-pointer"
+                        title="Sumar una pieza"
                       >
                         +
                       </button>
                       <button
                         onClick={() => handleRemoveItem(idx)}
-                        className="w-7 h-7 rounded-lg text-rose-600 hover:bg-rose-100 flex items-center justify-center ml-1 transition-colors cursor-pointer border border-rose-200"
+                        className="w-5 h-5 rounded text-rose-600 hover:bg-rose-50 flex items-center justify-center ml-0.5 transition-colors cursor-pointer border border-rose-200"
                         title="Eliminar partida"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-2.5 h-2.5" />
                       </button>
                     </div>
                   </div>
@@ -1904,13 +1792,13 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               )}
             </div>
 
-            {/* Loyalty Points Redemption Bar (if customer has points) */}
+            {/* Canje de puntos de fidelidad si el cliente tiene saldo */}
             {selectedCustomer && selectedCustomer.points > 0 && subtotal > 0 && (
-              <div className="bg-[#FFF5F0] p-2 border-b-2 border-[#E5E1DA] flex items-center justify-between text-xs shrink-0">
-                <div className="flex items-center gap-1.5 text-slate-900 font-bold truncate">
-                  <Sparkles className="w-4 h-4 text-[#D95D39] shrink-0" />
+              <div className="bg-[#FFF5F0] px-2 py-0.5 border-b border-[#E5E1DA] flex items-center justify-between text-xs shrink-0">
+                <div className="flex items-center gap-1 text-slate-900 font-bold truncate">
+                  <Sparkles className="w-3 h-3 text-[#D95D39] shrink-0" />
                   <span className="truncate">{selectedCustomer.name.split(' ')[0]}:</span>
-                  <strong className="text-emerald-700 font-mono font-black text-sm">${selectedCustomer.points} pts</strong>
+                  <strong className="text-emerald-700 font-mono font-black text-xs">{selectedCustomer.points} pts disp.</strong>
                 </div>
                 {pointsToRedeem === 0 ? (
                   <button
@@ -1918,85 +1806,70 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                       playBeep(850, 'sine', 0.08);
                       setPointsToRedeem(maxRedeemablePoints);
                     }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-2.5 py-1 rounded-lg text-xs shadow-xs shrink-0 cursor-pointer font-mono"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-2 py-0.5 rounded text-[11px] shadow-2xs shrink-0 cursor-pointer font-mono"
                   >
                     Canjear -${maxRedeemablePoints}
                   </button>
                 ) : (
                   <button
                     onClick={() => setPointsToRedeem(0)}
-                    className="bg-white hover:bg-slate-100 text-slate-800 border-2 border-[#E5E1DA] font-bold px-2 py-1 rounded-lg text-xs shrink-0 cursor-pointer"
+                    className="bg-white hover:bg-slate-100 text-slate-800 border border-[#E5E1DA] font-bold px-2 py-0.5 rounded text-[11px] shrink-0 cursor-pointer"
                   >
-                    Quitar
+                    Quitar Canje
                   </button>
                 )}
               </div>
             )}
 
-            {/* Totals & Action Section (Always Fixed in View & Never Cut Off) */}
-            <div className="p-3 sm:p-3.5 bg-white space-y-2.5 shrink-0 border-t-2 border-[#E5E1DA]">
-              <div className="space-y-1 text-xs">
-                <div className="flex justify-between text-slate-600 font-bold text-xs sm:text-sm">
-                  <span>Subtotal ({totalPieces} piezas):</span>
-                  <span className="font-mono font-black text-slate-900 text-sm sm:text-base">${subtotal.toFixed(2)}</span>
-                </div>
-
-                {specialCustomerDiscount > 0 && (
-                  <div className="flex justify-between items-center text-amber-950 bg-amber-100/80 px-2 py-1 rounded-xl border border-amber-400 font-black text-xs sm:text-sm animate-in fade-in">
-                    <span className="flex items-center gap-1">
-                      <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-700 shrink-0" />
-                      <span>Desc. Cliente Especial (10%):</span>
-                    </span>
-                    <span className="font-mono">-${specialCustomerDiscount.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {actualDiscount > 0 && (
-                  <div className="flex justify-between text-emerald-700 font-black text-xs sm:text-sm">
-                    <span>Desc. Club ({actualDiscount} pts):</span>
-                    <span className="font-mono">-${actualDiscount.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {/* Botón rápido 10% Cliente Especial en carrito */}
+            {/* Sección de Totales, Descuento Especial al Cobrar y Botones de Cobro */}
+            <div className="p-2 bg-white space-y-1 shrink-0 border-t border-[#E5E1DA]">
+              {/* Fila Subtotal + Botón Descuento 10% Especial unificados en una sola línea */}
+              <div className="flex items-center justify-between text-slate-700 font-bold text-xs">
+                <span>Subtotal ({totalPieces} pzs): <strong className="font-mono font-black text-slate-950 text-xs sm:text-sm">${subtotal.toFixed(2)}</strong></span>
+                
                 {ticketItems.length > 0 && (
                   <button
+                    id="checkout-special-discount-btn"
                     type="button"
                     onClick={() => {
                       playBeep(isSpecialCustomerDiscount ? 450 : 750, 'triangle', 0.05);
                       setIsSpecialCustomerDiscount(!isSpecialCustomerDiscount);
                     }}
-                    className={`w-full py-1.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border active:scale-95 ${
+                    className={`py-0.5 px-2 rounded-md text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer border active:scale-95 ${
                       isSpecialCustomerDiscount
-                        ? 'bg-amber-500 text-amber-950 border-amber-600 ring-2 ring-amber-400 font-black'
+                        ? 'bg-amber-400 text-amber-950 border-amber-600 font-black shadow-2xs'
                         : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                     }`}
+                    title="Aplicar o remover el 10% de descuento especial"
                   >
-                    <Star className={`w-3.5 h-3.5 ${isSpecialCustomerDiscount ? 'fill-amber-950 text-amber-950' : 'fill-amber-600 text-amber-700'}`} />
-                    <span>{isSpecialCustomerDiscount ? '⭐ Quitar Descuento 10%' : '⭐ Aplicar 10% Cliente Especial'}</span>
+                    <Star className={`w-3 h-3 ${isSpecialCustomerDiscount ? 'fill-amber-950 text-amber-950' : 'fill-amber-600 text-amber-700'}`} />
+                    <span>{isSpecialCustomerDiscount ? '10% Especial: SÍ (-$' + specialCustomerDiscount.toFixed(2) + ')' : '⭐ Desc. 10% Especial'}</span>
                   </button>
-                )}
-
-                <div className="flex justify-between items-baseline pt-1 border-t-2 border-[#E5E1DA]">
-                  <span className="text-sm sm:text-base font-black text-slate-950 uppercase tracking-tight">Total a Cobrar:</span>
-                  <span className="text-4xl sm:text-5xl lg:text-6xl font-black text-[#D95D39] font-mono tracking-tight drop-shadow-xs">
-                    ${total.toFixed(2)}
-                  </span>
-                </div>
-
-                {pointsEarned > 0 && (
-                  <div className="text-right text-xs text-[#D95D39] font-black">
-                    ⭐ +{pointsEarned} pts al cliente en esta compra
-                  </div>
                 )}
               </div>
 
-              {/* CALCULADORA DE CAMBIO RÁPIDO SOLICITADA (Compacta y sin tapar botones) */}
+              {/* Descuentos de puntos si existen */}
+              {actualDiscount > 0 && (
+                <div className="flex justify-between text-emerald-700 font-black text-xs">
+                  <span>Desc. Puntos ({actualDiscount} pts):</span>
+                  <span className="font-mono text-xs sm:text-sm">-${actualDiscount.toFixed(2)}</span>
+                </div>
+              )}
+
+              {/* TOTAL A COBRAR (Muy visible pero con altura optimizada) */}
+              <div className="flex justify-between items-center py-0.5 border-t border-[#E5E1DA]">
+                <span className="text-xs sm:text-sm font-black text-slate-950 uppercase tracking-tight">Total a Cobrar:</span>
+                <span className="text-3xl sm:text-4xl font-black text-[#D95D39] font-mono tracking-tight leading-none drop-shadow-2xs">
+                  ${total.toFixed(2)}
+                </span>
+              </div>
+
+              {/* CALCULADORA DE CAMBIO RÁPIDO CON BILLETES */}
               {ticketItems.length > 0 && total > 0 && (
-                <div className="bg-[#FAF8F6] rounded-2xl p-2.5 border-2 border-amber-400 shadow-xs space-y-1.5 animate-in fade-in">
+                <div className="bg-[#FAF8F6] rounded-lg p-1.5 border border-amber-400 shadow-2xs space-y-1 animate-in fade-in">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
-                      <Banknote className="w-4 h-4 text-[#D95D39]" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-800 flex items-center gap-1">
+                      <Banknote className="w-3 h-3 text-[#D95D39]" />
                       <span>¿Con cuánto pagan? (Cambio)</span>
                     </span>
                     {cashGivenInput && (
@@ -2006,7 +1879,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                           playBeep(450, 'sine', 0.03);
                           setCashGivenInput('');
                         }}
-                        className="text-xs font-black text-slate-600 hover:text-[#D95D39] underline cursor-pointer"
+                        className="text-[10px] font-black text-slate-600 hover:text-[#D95D39] underline cursor-pointer"
                         title="Borrar cálculo"
                       >
                         Limpiar
@@ -2015,7 +1888,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   </div>
 
                   {/* Fila de Billetes Rápidos: Exacto, 50, 100, 200, 500, 1000 */}
-                  <div className="grid grid-cols-6 gap-1 sm:gap-1.5">
+                  <div className="grid grid-cols-6 gap-1">
                     <button
                       id="quick-bill-exact-btn"
                       type="button"
@@ -2023,9 +1896,9 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                         playBeep(750, 'sine', 0.03);
                         setCashGivenInput(total.toString());
                       }}
-                      className={`py-2 px-1 rounded-xl font-black text-xs sm:text-sm font-mono transition-all text-center border-2 cursor-pointer active:scale-95 ${
+                      className={`py-1 px-0.5 rounded-md font-black text-xs font-mono transition-all text-center border cursor-pointer active:scale-95 ${
                         numericCashGiven === total
-                          ? 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-emerald-400 shadow-xs'
+                          ? 'bg-emerald-600 text-white border-emerald-700 ring-1 ring-emerald-400 shadow-2xs'
                           : 'bg-white hover:bg-emerald-50 text-emerald-900 border-emerald-300'
                       }`}
                       title="Pago exacto sin cambio"
@@ -2044,7 +1917,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                             playBeep(700, 'sine', 0.03);
                             setCashGivenInput(bill.value.toString());
                           }}
-                          className={`py-2 px-1 rounded-xl font-black text-xs sm:text-sm font-mono transition-all text-center border-2 cursor-pointer active:scale-95 ${
+                          className={`py-1 px-0.5 rounded-md font-black text-xs font-mono transition-all text-center border cursor-pointer active:scale-95 ${
                             isSelected ? bill.active : bill.bg
                           }`}
                           title={`Calcular cambio si pagan con billete de ${bill.label}`}
@@ -2055,122 +1928,82 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                     })}
                   </div>
 
-                  {/* Input personalizado manual */}
-                  <div className="flex items-center gap-2">
+                  {/* Entrada manual de billete recibido */}
+                  <div className="flex items-center gap-1.5">
                     <div className="relative flex-1">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-black text-slate-500">$</span>
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-black text-slate-500">$</span>
                       <input
                         id="custom-cash-input-field"
                         type="number"
-                        placeholder="Otro billete o moneda..."
+                        placeholder="Otro billete..."
                         value={cashGivenInput}
                         onChange={(e) => setCashGivenInput(e.target.value)}
-                        className="w-full pl-6 pr-3 py-1.5 bg-white rounded-xl text-sm font-black font-mono border-2 border-amber-300 focus:outline-none focus:ring-2 focus:ring-[#D95D39] text-slate-900"
+                        className="w-full pl-5 pr-2 py-0.5 h-6.5 bg-white rounded-md text-xs font-black font-mono border border-amber-300 focus:outline-none focus:ring-1 focus:ring-[#D95D39] text-slate-900"
                         title="Escribe cualquier monto recibido"
                       />
                     </div>
 
                     {numericCashGiven > 0 && numericCashGiven < total && (
-                      <div className="bg-amber-500 text-amber-950 px-2.5 py-1.5 rounded-xl font-black font-mono text-xs sm:text-sm shrink-0 border border-amber-600">
+                      <div className="bg-amber-500 text-amber-950 px-2 py-0.5 h-6.5 rounded-md font-black font-mono text-xs shrink-0 border border-amber-600 flex items-center">
                         Faltan: ${cashShortage}.00
                       </div>
                     )}
                   </div>
 
-                  {/* Alerta Visual Compacta de Cambio para nunca ocultar los botones */}
+                  {/* CAMBIO GIGANTE */}
                   {numericCashGiven > 0 && numericCashGiven > total && (
-                    <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-2 px-3 rounded-2xl flex items-center justify-between shadow-md border-2 border-emerald-400 animate-in zoom-in-95">
-                      <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black uppercase tracking-wide text-emerald-100">
+                    <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white py-1 px-2.5 rounded-md flex items-center justify-between shadow-2xs border border-emerald-400 animate-in zoom-in-95">
+                      <div className="flex items-center gap-1 text-[11px] font-black uppercase tracking-wide text-emerald-100">
                         <span>💵 CAMBIO:</span>
                       </div>
-                      <div className="text-3xl sm:text-4xl font-black font-mono text-amber-200 tracking-tight">
+                      <div className="text-xl sm:text-2xl font-black font-mono text-amber-200 tracking-tight leading-none">
                         ${calculatedPosChange}.00
                       </div>
-                      <div className="text-xs font-black text-emerald-100 font-mono">
+                      <div className="text-[10px] font-black text-emerald-100 font-mono">
                         (${numericCashGiven} - ${total})
                       </div>
                     </div>
                   )}
 
                   {numericCashGiven === total && numericCashGiven > 0 && (
-                    <div className="bg-emerald-100 border-2 border-emerald-300 text-emerald-950 py-1 px-2.5 rounded-xl text-center text-xs sm:text-sm font-black">
+                    <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 py-0.5 px-2 rounded-md text-center text-xs font-black">
                       ✅ Pago Exacto (${total}.00) — Sin cambio
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Cuadrícula 2x2 de Botones de Cobro para no requerir scroll */}
-              <div className="space-y-2 pt-0.5">
-                <div className="grid grid-cols-2 gap-2">
-                  {/* Fila 1 - Col 1: Cobrar sin Ticket */}
+              {/* BOTONES DE COBRO DEFINITIVOS EN EFECTIVO (Sin Tarjeta ni Pide y Recoge) */}
+              <div className="space-y-1 pt-0.5">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {/* Botón 1: Cobro Rápido Sin Ticket */}
                   <button
                     id="quick-checkout-no-ticket-btn"
                     type="button"
                     disabled={ticketItems.length === 0}
                     onClick={handleQuickCheckoutWithoutTicket}
-                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3 sm:py-3.5 px-2 rounded-2xl shadow-xs hover:shadow-md transition-all active:scale-98 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-xs sm:text-sm lg:text-base cursor-pointer border-2 border-emerald-500 text-center"
-                    title="Registrar venta inmediatamente sin ticket (animación de dona sonriente)"
+                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-1.5 sm:py-2 px-2 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer border border-emerald-500 text-center"
+                    title="Registrar venta en efectivo sin imprimir ticket (animación de dona sonriente)"
                   >
-                    <span className="text-lg sm:text-xl">🍩</span>
+                    <span className="text-base sm:text-lg">🍩</span>
                     <span className="leading-tight">Sin Ticket</span>
                   </button>
 
-                  {/* Fila 1 - Col 2: Cobrar Ticket */}
+                  {/* Botón 2: Cobrar con Ticket Térmico */}
                   <button
                     id="checkout-and-print-btn"
                     type="button"
                     disabled={ticketItems.length === 0}
                     onClick={() => handleCompleteSale()}
-                    className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] hover:from-[#BF4C2A] hover:to-[#9E3B1C] disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3 sm:py-3.5 px-2 rounded-2xl shadow-xs hover:shadow-md transition-all active:scale-98 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-xs sm:text-sm lg:text-base cursor-pointer border-2 border-[#BF4C2A] text-center"
+                    className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] hover:from-[#BF4C2A] hover:to-[#9E3B1C] disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-1.5 sm:py-2 px-2 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer border border-[#BF4C2A] text-center"
                     title="Cobrar en efectivo e imprimir ticket térmico directo"
                   >
-                    <Printer className="w-5 h-5 shrink-0 stroke-[2.5]" />
+                    <Printer className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
                     <span className="leading-tight">Cobrar Ticket 🖨️</span>
-                  </button>
-
-                  {/* Fila 2 - Col 1: Cobrar Tarjeta / Zettle Bluetooth */}
-                  <button
-                    id="zettle-pos-checkout-btn"
-                    type="button"
-                    disabled={ticketItems.length === 0}
-                    onClick={() => {
-                      playBeep(700, 'sine', 0.05);
-                      setShowZettleModal(true);
-                    }}
-                    className="bg-gradient-to-r from-[#002C8A] via-[#004BB3] to-[#0079C1] hover:from-[#001D5C] hover:to-[#005B94] disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3 sm:py-3.5 px-2 rounded-2xl shadow-xs hover:shadow-md transition-all active:scale-98 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-xs sm:text-sm lg:text-base cursor-pointer border-2 border-blue-400 text-center relative"
-                    title="Cobrar con tarjeta usando Terminal PayPal Zettle por Bluetooth"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <CreditCard className="w-4 h-4 text-amber-300 shrink-0" />
-                      <span className="leading-tight">Tarjeta 💳</span>
-                    </div>
-                    {zettleDevice?.connected && (
-                      <span className="hidden sm:inline-block absolute -top-2 -right-1 bg-emerald-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black border-2 border-white">
-                        BT ON
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Fila 2 - Col 2: PEDIDO PIDE Y RECOGE (BOTÓN MORADO) */}
-                  <button
-                    id="pos-order-credit-btn"
-                    type="button"
-                    onClick={handleOpenOrderModal}
-                    className="bg-gradient-to-r from-purple-700 via-purple-800 to-indigo-800 hover:from-purple-800 hover:to-indigo-900 text-white font-black py-3 sm:py-3.5 px-2 rounded-2xl shadow-xs hover:shadow-md transition-all active:scale-98 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-xs sm:text-sm lg:text-base cursor-pointer border-2 border-purple-400 text-center relative"
-                    title="Registrar o armar pedido Pide y Recoge (desde 0 o con panes del ticket)"
-                  >
-                    <ClipboardList className="w-5 h-5 text-amber-300 shrink-0 stroke-[2.5]" />
-                    <div className="flex flex-col items-center sm:items-start leading-tight">
-                      <span>Pide y Recoge 🛍️</span>
-                    </div>
-                    <span className="hidden sm:inline-block absolute -top-2 -right-1 bg-amber-400 text-purple-950 text-[9px] px-2 py-0.5 rounded-full font-black border-2 border-purple-900 shadow-2xs">
-                      Recoge
-                    </span>
                   </button>
                 </div>
 
-                {/* BOTÓN: CORTE DE CAJA / CORTE DEL TURNO */}
+                {/* BOTÓN: CORTE DE CAJA / TURNO (Maggie, Angy, Amari, Gabo) */}
                 <button
                   id="shift-cut-open-btn"
                   type="button"
@@ -2178,11 +2011,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                     playBeep(650, 'sine', 0.05);
                     setShowShiftCutModal(true);
                   }}
-                  className="w-full bg-[#FAF8F6] hover:bg-[#FFF5F0] text-slate-900 hover:text-[#D95D39] border-2 border-amber-300 hover:border-[#D95D39] font-black py-2 px-3 rounded-2xl shadow-xs transition-all active:scale-98 flex items-center justify-center gap-2 text-xs sm:text-sm cursor-pointer"
-                  title="Abrir ventana de Corte de Caja / Corte del Turno con salidas a proveedores y cálculo automático"
+                  className="w-full bg-[#FAF8F6] hover:bg-[#FFF5F0] text-slate-900 hover:text-[#D95D39] border border-amber-300 hover:border-[#D95D39] font-black py-1 px-3 rounded-lg shadow-2xs transition-all active:scale-98 flex items-center justify-center gap-1.5 text-xs cursor-pointer"
+                  title="Abrir ventana de Corte de Caja / Corte del Turno (Maggie, Angy, Amari, Gabo)"
                 >
-                  <Receipt className="w-4 h-4 text-[#D95D39]" />
-                  <span>Corte de Caja / Corte del Turno 📋</span>
+                  <Receipt className="w-3 h-3 text-[#D95D39]" />
+                  <span>Corte de Caja / Turno 📋</span>
                 </button>
               </div>
             </div>
@@ -2198,37 +2031,13 @@ export const PosCounter: React.FC<PosCounterProps> = ({
             <span className="text-base font-black text-amber-400 leading-none">${total}.00</span>
           </div>
 
-          <div className="flex items-center gap-1 overflow-x-auto">
-            <button
-              id="mobile-zettle-checkout-btn"
-              type="button"
-              onClick={() => {
-                playBeep(700, 'sine', 0.05);
-                setShowZettleModal(true);
-              }}
-              className="bg-gradient-to-r from-[#002C8A] to-[#0079C1] text-white font-black text-[11px] py-2 px-2 rounded-xl shadow-xs flex items-center gap-1 active:scale-95 cursor-pointer border border-blue-400 whitespace-nowrap"
-              title="Cobrar Tarjeta Zettle"
-            >
-              <CreditCard className="w-3 h-3 text-amber-300" />
-              <span>Tarjeta</span>
-            </button>
-
-            <button
-              id="mobile-pos-order-credit-btn"
-              type="button"
-              onClick={handleOpenOrderModal}
-              className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white font-black text-[11px] py-2 px-2 rounded-xl shadow-xs flex items-center gap-1 active:scale-95 cursor-pointer border border-purple-400 whitespace-nowrap"
-              title="Pedido Pide y Recoge"
-            >
-              <ClipboardList className="w-3 h-3 text-amber-300" />
-              <span>Pide y Recoge 🛍️</span>
-            </button>
-
+          <div className="flex items-center gap-1.5 flex-1 justify-end">
             <button
               id="mobile-quick-checkout-no-ticket-btn"
               type="button"
               onClick={handleQuickCheckoutWithoutTicket}
-              className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-black text-[11px] py-2 px-2 rounded-xl shadow-xs flex items-center gap-1 active:scale-95 cursor-pointer border border-emerald-400 whitespace-nowrap"
+              className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-black text-xs py-2 px-3 rounded-xl shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer border border-emerald-400 whitespace-nowrap"
+              title="Cobro rápido sin ticket"
             >
               <span>🍩</span>
               <span>Sin Ticket</span>
@@ -2238,10 +2047,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               id="mobile-checkout-print-btn"
               type="button"
               onClick={() => handleCompleteSale()}
-              className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] text-white font-black text-[11px] py-2 px-2 rounded-xl shadow-xs flex items-center gap-1 active:scale-95 cursor-pointer border border-[#BF4C2A] whitespace-nowrap"
+              className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] text-white font-black text-xs py-2 px-3 rounded-xl shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer border border-[#BF4C2A] whitespace-nowrap"
+              title="Cobrar con ticket"
             >
-              <Printer className="w-3 h-3 shrink-0" />
-              <span>Ticket</span>
+              <Printer className="w-3.5 h-3.5 shrink-0" />
+              <span>Cobrar Ticket</span>
             </button>
           </div>
         </div>
@@ -2706,6 +2516,185 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   Establecer {numpadValue || '0'} {parseInt(numpadValue, 10) === 1 ? 'Pieza' : 'Piezas'}
                 </span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Teclado Virtual para Cliente / Club de Puntos (Solo Teléfono, Sin Nombre) */}
+      {showCustomerPhoneKeyboardModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-md w-full border-2 border-amber-400 animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-amber-100">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-2xl bg-amber-100 text-amber-900 border border-amber-300 flex items-center justify-center font-bold shadow-xs">
+                  <Phone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-slate-900 leading-tight flex items-center gap-1.5">
+                    <span>Club Puntos Santa Fé</span>
+                    <span className="text-[10px] bg-amber-200 text-amber-950 font-bold px-1.5 py-0.2 rounded font-mono">
+                      $20 = 1pt
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-600 font-bold">
+                    Ingresa el teléfono del cliente (solo 10 dígitos)
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-phone-keyboard-modal-btn"
+                type="button"
+                onClick={() => setShowCustomerPhoneKeyboardModal(false)}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-full hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Display Pantalla Digital del Teléfono */}
+            <div className="mt-3 bg-gradient-to-br from-slate-950 to-slate-900 rounded-2xl p-4 text-white shadow-inner border-2 border-amber-400 text-center">
+              <div className="text-[10px] uppercase font-black text-amber-300 tracking-wider flex items-center justify-between px-1">
+                <span>Teléfono Celular</span>
+                <span className="font-mono">{virtualPhoneInput.replace(/\D/g, '').length} / 10 dígitos</span>
+              </div>
+              <div className="text-2xl sm:text-3xl font-mono font-black text-amber-400 tracking-wider py-1 select-none flex items-center justify-center gap-1">
+                {virtualPhoneInput.replace(/\D/g, '').length === 0 ? (
+                  <span className="text-slate-500 text-lg sm:text-xl font-sans font-bold">_ _ _  _ _ _  _ _ _ _</span>
+                ) : (
+                  (() => {
+                    const clean = virtualPhoneInput.replace(/\D/g, '');
+                    if (clean.length <= 3) return clean;
+                    if (clean.length <= 6) return `${clean.slice(0, 3)} ${clean.slice(3)}`;
+                    return `${clean.slice(0, 3)} ${clean.slice(3, 6)} ${clean.slice(6)}`;
+                  })()
+                )}
+                <span className="inline-block w-1.5 h-6 bg-amber-400 animate-pulse ml-1" />
+              </div>
+            </div>
+
+            {/* Estado de Detección en tiempo real */}
+            {(() => {
+              const clean = virtualPhoneInput.replace(/\D/g, '');
+              const found = clean.length >= 7 ? customers.find(c => c.phone.replace(/\D/g, '') === clean) : null;
+
+              if (found) {
+                return (
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 flex items-center justify-between gap-2 animate-in fade-in">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-xs font-black text-emerald-950">
+                        <span>✅ Cliente Registrado</span>
+                      </div>
+                      <div className="text-[11px] text-emerald-800 font-bold">
+                        Saldo: <strong className="font-mono text-emerald-900 font-black">{found.points} pts</strong> (${found.points}.00 de descuento)
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRegisterOrSelectPhone(found.phone)}
+                      className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-black px-3 py-1.5 rounded-lg shadow-xs cursor-pointer shrink-0"
+                    >
+                      Seleccionar ⭐
+                    </button>
+                  </div>
+                );
+              }
+
+              if (clean.length >= 7) {
+                return (
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-amber-50 border border-amber-300 flex items-center justify-between gap-2 animate-in fade-in">
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-amber-950">
+                        ⭐ Teléfono Nuevo
+                      </div>
+                      <div className="text-[10px] text-amber-800 font-bold">
+                        Listo para afiliar y acumular puntos en esta venta
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRegisterOrSelectPhone(clean)}
+                      className="bg-[#D95D39] hover:bg-[#BF4C2A] active:scale-95 text-white text-xs font-black px-3 py-1.5 rounded-lg shadow-xs cursor-pointer shrink-0 flex items-center gap-1"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Afiliar Ahora</span>
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="mt-2.5 py-1.5 text-center text-slate-500 text-xs font-medium">
+                  Presiona los números en pantalla para ingresar los 10 dígitos.
+                </div>
+              );
+            })()}
+
+            {/* Teclado Numérico Virtual Táctil */}
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              {[
+                { label: '1', key: '1' },
+                { label: '2', key: '2' },
+                { label: '3', key: '3' },
+                { label: '4', key: '4' },
+                { label: '5', key: '5' },
+                { label: '6', key: '6' },
+                { label: '7', key: '7' },
+                { label: '8', key: '8' },
+                { label: '9', key: '9' },
+                { label: 'C', sub: 'Limpiar', key: 'CLEAR', bg: 'bg-slate-200 hover:bg-slate-300 text-slate-900 border-slate-300' },
+                { label: '0', key: '0' },
+                { label: '⌫', sub: 'Borrar', key: 'BACKSPACE', bg: 'bg-rose-100 hover:bg-rose-200 text-rose-900 border-rose-300' }
+              ].map((btn, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleVirtualPhoneKeyPress(btn.key)}
+                  className={`h-13 sm:h-15 active:scale-95 font-black rounded-2xl border-2 shadow-xs cursor-pointer flex flex-col items-center justify-center transition-transform ${
+                    btn.bg || 'bg-slate-100 hover:bg-slate-200 text-slate-950 text-2xl border-slate-300'
+                  }`}
+                >
+                  <span className={btn.key === 'CLEAR' || btn.key === 'BACKSPACE' ? 'text-lg leading-none' : 'text-2xl leading-none'}>
+                    {btn.label}
+                  </span>
+                  {btn.sub && (
+                    <span className="text-[9px] font-black uppercase tracking-tight leading-none mt-0.5">
+                      {btn.sub}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Acciones Inferiores del Modal */}
+            <div className="flex gap-2.5 mt-3.5 pt-3 border-t-2 border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowCustomerPhoneKeyboardModal(false)}
+                className="w-1/3 py-3 rounded-2xl border-2 border-slate-300 text-slate-800 font-black text-xs sm:text-sm hover:bg-slate-50 cursor-pointer"
+              >
+                Cerrar
+              </button>
+              {(() => {
+                const clean = virtualPhoneInput.replace(/\D/g, '');
+                const found = clean.length >= 7 ? customers.find(c => c.phone.replace(/\D/g, '') === clean) : null;
+                const canAffiliate = clean.length >= 7;
+
+                return (
+                  <button
+                    type="button"
+                    disabled={!canAffiliate}
+                    onClick={() => handleRegisterOrSelectPhone(clean)}
+                    className="w-2/3 py-3 rounded-2xl bg-gradient-to-r from-[#D95D39] to-[#bf4c2a] hover:from-[#bf4c2a] hover:to-[#a33e20] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm shadow-md shadow-[#D95D3933] transition-all active:scale-98 flex items-center justify-center gap-1.5 cursor-pointer border-2 border-[#a33e20]"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>
+                      {found ? `Seleccionar (${found.points} pts)` : canAffiliate ? `Afiliar Teléfono` : `Ingresa Teléfono`}
+                    </span>
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -3639,7 +3628,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
           isOpen={showZettleModal}
           amount={total}
           folio={getNextTicketFolio()}
-          customerName={selectedCustomer ? selectedCustomer.name : (newCustomerName.trim() || undefined)}
+          customerName={selectedCustomer ? selectedCustomer.name : (phoneSearch.replace(/\D/g, '') ? `Tel: ${phoneSearch.replace(/\D/g, '')}` : undefined)}
           onClose={() => setShowZettleModal(false)}
           onPaymentApproved={(cardDetails) => handleZettleCardCheckout(cardDetails)}
         />

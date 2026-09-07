@@ -87,7 +87,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
   // Quick prices edit string
   const [quickPricesInput, setQuickPricesInput] = useState<string>(
-    settings.quickPrices.join(', ')
+    settings.quickPrices.filter(p => {
+      const num = Number(p);
+      return num !== 8 && !(num >= 90 && num <= 100);
+    }).join(', ')
   );
 
   // Printer test state
@@ -168,7 +171,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     const parsedPrices = quickPricesInput
       .split(',')
       .map(s => parseFloat(s.trim()))
-      .filter(n => !isNaN(n) && n > 0);
+      .filter(n => !isNaN(n) && n > 0 && n !== 8 && !(n >= 90 && n <= 100));
 
     const updatedSettings: Settings = {
       ...localSettings,
@@ -419,7 +422,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           }`}
         >
           <DollarSign className="w-4 h-4" />
-          <span>Botones de Precios Rápidos ($8, $10, $12...)</span>
+          <span>Botones de Precios Rápidos ($5, $6.50, $12...)</span>
         </button>
 
         <button
@@ -515,7 +518,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               className="w-full px-4 py-3 bg-amber-50 rounded-2xl border-2 border-amber-200 font-mono font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
             />
             <p className="text-[11px] text-slate-500">
-              Predeterminados de mostrador: 5, 8, 12, 15, 18, 20, 25
+              Predeterminados de mostrador Zakia: 5, 6.5, 12, 15, 18, 20, 25, 30, 35
             </p>
           </div>
 
