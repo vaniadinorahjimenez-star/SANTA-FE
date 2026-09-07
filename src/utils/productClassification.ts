@@ -135,7 +135,7 @@ export function calculateItemsBreakdown(
 
 /**
  * Calcula el desglose de Pan vs Otros sobre un conjunto de Tickets de Venta,
- * incluyendo la lista itemizada de todos los productos que no son pan vendidos (ej. paletas, quesos, leche, etc.)
+ * incluyendo la lista itemizada de todos los productos que no son pan vendidos (ej. lácteos, quesos, postres, granola, etc.)
  */
 export function calculateTicketsBreakdown(tickets: Array<{ items: TicketItem[]; total: number }>): BreadSalesBreakdown {
   let breadTotal = 0;

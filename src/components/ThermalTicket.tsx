@@ -479,7 +479,7 @@ export const ThermalTicket: React.FC<ThermalTicketProps> = ({
               </div>
               {currentTicket.discount > 0 && (
                 <div className="flex justify-between font-black">
-                  <span>DESCUENTO PUNTOS:</span>
+                  <span>{currentTicket.pointsRedeemed && currentTicket.pointsRedeemed > 0 ? 'DESCUENTO PUNTOS:' : 'DESCUENTO (10% ESPECIAL):'}</span>
                   <span>-${currentTicket.discount.toFixed(2)}</span>
                 </div>
               )}

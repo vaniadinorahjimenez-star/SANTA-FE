@@ -63,6 +63,8 @@ export interface SaleTicket {
   customerPhone?: string;
   pointsEarned: number;
   pointsRedeemed: number;
+  isSpecialDiscount?: boolean;
+  specialDiscount?: number;
   cashier: string;
   shift?: 'turno1' | 'turno2';
 }

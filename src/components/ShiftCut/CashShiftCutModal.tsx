@@ -51,7 +51,7 @@ interface CashShiftCutModalProps {
   onCutSaved?: (cut: ShiftCutRecord) => void;
 }
 
-const CASHIER_PRESETS = ['Paty', 'Mari', 'Jonathan', 'Natty'];
+const CASHIER_PRESETS = ['Maggie', 'Angy', 'Amari', 'Gabo'];
 
 const COMMON_EXPENSE_PRESETS = [
   { label: '🚗 Uber / Transporte', concept: 'Uber / Transporte' },
@@ -80,11 +80,12 @@ export const CashShiftCutModal: React.FC<CashShiftCutModalProps> = ({
   const [autoTime, setAutoTime] = useState<string>(getNowTimeString());
   const [autoDateFormatted, setAutoDateFormatted] = useState<string>('');
 
-  // Cashier / Person Name (persisted in localStorage or empty if previous was generic)
+  // Cashier / Person Name (persisted in localStorage or default to Maggie)
   const [cashierName, setCashierName] = useState<string>(() => {
     const saved = localStorage.getItem('santafe_last_cashier_name');
-    if (saved && saved !== 'Mostrador Principal') return saved;
-    return '';
+    if (saved && CASHIER_PRESETS.includes(saved)) return saved;
+    if (saved && !['Paty', 'Mari', 'Jonathan', 'Natty', 'Mostrador Principal', 'Sin asignar'].includes(saved)) return saved;
+    return 'Maggie';
   });
 
   // Shift Name (Prioridad: lee el turno activo en mostrador, o detecta por horario: antes de 15:00 = Turno 1, >= 15:00 = Turno 2)
@@ -859,7 +860,7 @@ export const CashShiftCutModal: React.FC<CashShiftCutModalProps> = ({
                     <div>
                       <input
                         type="text"
-                        placeholder="Entregado a / Recibió (Ej. Chofer, Paty...)"
+                        placeholder="Entregado a / Recibió (Ej. Chofer, Maggie...)"
                         value={newRecipient}
                         onChange={(e) => setNewRecipient(e.target.value)}
                         className="w-full bg-slate-50 px-3 py-1.5 rounded-xl text-xs border border-slate-200 focus:outline-none focus:ring-1 focus:ring-rose-400"

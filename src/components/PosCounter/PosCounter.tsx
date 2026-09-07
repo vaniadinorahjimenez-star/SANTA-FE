@@ -242,8 +242,16 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     customerName?: string;
   } | null>(null);
 
-  // Clientes Preferentes / Precios Especiales toggle
-  const [showPreferentialPrices, setShowPreferentialPrices] = useState<boolean>(false);
+  // Descuento 10% Cliente Especial (Sucursal Zakia)
+  const [isSpecialCustomerDiscount, setIsSpecialCustomerDiscount] = useState<boolean>(false);
+
+  // Cashier / Person on register presets (Maggie, Angy, Amari, Gabo)
+  const cashierPresets = ['Maggie', 'Angy', 'Amari', 'Gabo'];
+  const [activeCashier, setActiveCashier] = useState<string>(() => {
+    const saved = localStorage.getItem('santafe_last_cashier_name');
+    if (saved && ['Maggie', 'Angy', 'Amari', 'Gabo'].includes(saved)) return saved;
+    return 'Maggie';
+  });
 
   // Cash Change Calculator state for the ticket panel
   const [cashGivenInput, setCashGivenInput] = useState<string>('');
@@ -257,15 +265,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     { value: 1000, label: '$1,000', bg: 'bg-purple-50 hover:bg-purple-100 text-purple-900 border-purple-300', active: 'bg-purple-600 text-white border-purple-700 ring-2 ring-purple-400 font-black shadow-sm' }
   ];
 
-  // Paleta & Postres selection modals/popovers
-  const [showPaletaModal, setShowPaletaModal] = useState<boolean>(false);
+  // Postres selection modal
   const [showPostresModal, setShowPostresModal] = useState<boolean>(false);
 
   // Precios rápidos de mostrador solicitados: 5, 6.50, 8, 12, 15, 18, 20, 25, 30, 35
   const quickPrices = [5, 6.5, 8, 12, 15, 18, 20, 25, 30, 35];
-
-  // Precios especiales para Clientes Preferentes ordenados: 4, 5, 5.50, 6, 7, 7.50, 9, 11, 12.50, 13
-  const preferentialPrices = [4, 5, 5.5, 6, 7, 7.5, 9, 11, 12.5, 13];
 
   // Helper formatting for prices
   const formatMoneyLabel = (num: number) => {
@@ -374,9 +378,17 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   // Calculations
   const subtotal = ticketItems.reduce((acc, item) => acc + item.total, 0);
   const totalPieces = ticketItems.reduce((acc, item) => acc + item.quantity, 0);
-  const maxRedeemablePoints = selectedCustomer ? Math.min(selectedCustomer.points, subtotal) : 0;
+
+  // Descuento del 10% para Clientes Especiales (Sucursal Zakia)
+  const specialCustomerDiscount = isSpecialCustomerDiscount
+    ? Number((subtotal * 0.10).toFixed(2))
+    : 0;
+
+  const subtotalAfterSpecial = Math.max(0, subtotal - specialCustomerDiscount);
+  const maxRedeemablePoints = selectedCustomer ? Math.min(selectedCustomer.points, subtotalAfterSpecial) : 0;
   const actualDiscount = Math.min(pointsToRedeem, maxRedeemablePoints);
-  const total = Math.max(0, subtotal - actualDiscount);
+  const totalDiscount = Number((specialCustomerDiscount + actualDiscount).toFixed(2));
+  const total = Math.max(0, Number((subtotal - totalDiscount).toFixed(2)));
 
   // Cash Change computations for the ticket area (50, 100, 200, 500, 1000)
   const numericCashGiven = parseFloat(cashGivenInput) || 0;
@@ -539,6 +551,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     playBeep(350, 'sawtooth', 0.08);
     setTicketItems([]);
     setPointsToRedeem(0);
+    setIsSpecialCustomerDiscount(false);
     setCashGivenInput('');
   };
 
@@ -580,7 +593,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       time: getNowTimeString(),
       items: [...ticketItems],
       subtotal,
-      discount: actualDiscount,
+      discount: totalDiscount,
       total,
       paymentMethod: 'efectivo',
       amountPaid: effectivePaid,
@@ -589,7 +602,9 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       customerPhone: selectedCustomer ? selectedCustomer.phone : (phoneSearch.replace(/\D/g, '') || undefined),
       pointsEarned,
       pointsRedeemed: actualDiscount,
-      cashier: 'Mostrador Principal',
+      isSpecialDiscount: isSpecialCustomerDiscount,
+      specialDiscount: specialCustomerDiscount,
+      cashier: activeCashier,
       shift: activeShift
     };
 
@@ -629,6 +644,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     // Reset local counter state for next customer
     setTicketItems([]);
     setPointsToRedeem(0);
+    setIsSpecialCustomerDiscount(false);
     setCashGivenInput('');
     setPhoneSearch('');
     setSelectedCustomer(null);
@@ -657,7 +673,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       time: getNowTimeString(),
       items: ticketItems,
       subtotal,
-      discount: actualDiscount,
+      discount: totalDiscount,
       total: currentTotal,
       paymentMethod: 'efectivo',
       amountPaid: effectivePaid,
@@ -666,7 +682,9 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       customerPhone: selectedCustomer ? selectedCustomer.phone : (phoneSearch.replace(/\D/g, '') || undefined),
       pointsEarned,
       pointsRedeemed: actualDiscount,
-      cashier: 'Mostrador Principal',
+      isSpecialDiscount: isSpecialCustomerDiscount,
+      specialDiscount: specialCustomerDiscount,
+      cashier: activeCashier,
       shift: activeShift
     };
 
@@ -704,6 +722,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     // Reset local counter state for next customer
     setTicketItems([]);
     setPointsToRedeem(0);
+    setIsSpecialCustomerDiscount(false);
     setCashGivenInput('');
     setPhoneSearch('');
     setSelectedCustomer(null);
@@ -731,7 +750,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       time: getNowTimeString(),
       items: ticketItems,
       subtotal,
-      discount: actualDiscount,
+      discount: totalDiscount,
       total,
       paymentMethod: 'tarjeta',
       cardTerminal: 'zettle',
@@ -744,7 +763,9 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       customerPhone: selectedCustomer ? selectedCustomer.phone : (phoneSearch.replace(/\D/g, '') || undefined),
       pointsEarned,
       pointsRedeemed: actualDiscount,
-      cashier: 'Mostrador Principal',
+      isSpecialDiscount: isSpecialCustomerDiscount,
+      specialDiscount: specialCustomerDiscount,
+      cashier: activeCashier,
       shift: activeShift
     };
 
@@ -785,6 +806,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     // Reset local counter state for next customer
     setTicketItems([]);
     setPointsToRedeem(0);
+    setIsSpecialCustomerDiscount(false);
     setCashGivenInput('');
     setPhoneSearch('');
     setSelectedCustomer(null);
@@ -1181,41 +1203,74 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               </div>
             </div>
 
-            {/* Switch Buttons */}
-            <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-2xl border border-slate-300">
-              <button
-                id="shift-switch-turno1-btn"
-                type="button"
-                onClick={() => handleToggleShift('turno1')}
-                className={`px-3 sm:px-4 py-2 rounded-xl font-black text-xs sm:text-sm transition-all duration-150 flex items-center gap-1.5 cursor-pointer active:scale-95 ${
-                  activeShift === 'turno1'
-                    ? 'bg-amber-500 text-amber-950 shadow-md ring-2 ring-amber-600 scale-102 font-black'
-                    : 'bg-transparent text-slate-700 hover:text-slate-950 hover:bg-white/60'
-                }`}
-                title="Activar Turno 1 (Mañana) para registrar ventas"
-              >
-                <span>🌅 Turno 1</span>
-                {activeShift === 'turno1' && (
-                  <span className="w-2 h-2 rounded-full bg-amber-950 animate-pulse"></span>
-                )}
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Cashier Selector: Maggie, Angy, Amari, Gabo */}
+              <div className="flex items-center gap-1 bg-amber-100/80 p-1 rounded-2xl border border-amber-300">
+                <span className="text-[10px] font-black text-amber-950 px-1.5 uppercase flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-[#D95D39]" />
+                  <span>Caja:</span>
+                </span>
+                {cashierPresets.map((name) => {
+                  const isSelected = activeCashier === name;
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      id={`pos-cashier-btn-${name.toLowerCase()}`}
+                      onClick={() => {
+                        playBeep(650, 'sine', 0.03);
+                        setActiveCashier(name);
+                        localStorage.setItem('santafe_last_cashier_name', name);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border active:scale-95 ${
+                        isSelected
+                          ? 'bg-[#D95D39] text-white border-[#b84a29] shadow-xs ring-2 ring-orange-300'
+                          : 'bg-white/90 hover:bg-white text-slate-700 border-amber-200'
+                      }`}
+                      title={`Registrar ventas a nombre de ${name}`}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </div>
 
-              <button
-                id="shift-switch-turno2-btn"
-                type="button"
-                onClick={() => handleToggleShift('turno2')}
-                className={`px-3 sm:px-4 py-2 rounded-xl font-black text-xs sm:text-sm transition-all duration-150 flex items-center gap-1.5 cursor-pointer active:scale-95 ${
-                  activeShift === 'turno2'
-                    ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-700 scale-102 font-black'
-                    : 'bg-transparent text-slate-700 hover:text-slate-950 hover:bg-white/60'
-                }`}
-                title="Activar Turno 2 (Tarde) para registrar ventas"
-              >
-                <span>🌇 Turno 2</span>
-                {activeShift === 'turno2' && (
-                  <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
-                )}
-              </button>
+              {/* Switch Buttons */}
+              <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-2xl border border-slate-300">
+                <button
+                  id="shift-switch-turno1-btn"
+                  type="button"
+                  onClick={() => handleToggleShift('turno1')}
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-black text-xs transition-all duration-150 flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    activeShift === 'turno1'
+                      ? 'bg-amber-500 text-amber-950 shadow-md ring-2 ring-amber-600 font-black'
+                      : 'bg-transparent text-slate-700 hover:text-slate-950 hover:bg-white/60'
+                  }`}
+                  title="Activar Turno 1 (Mañana) para registrar ventas"
+                >
+                  <span>🌅 T1</span>
+                  {activeShift === 'turno1' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-950 animate-pulse"></span>
+                  )}
+                </button>
+
+                <button
+                  id="shift-switch-turno2-btn"
+                  type="button"
+                  onClick={() => handleToggleShift('turno2')}
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-black text-xs transition-all duration-150 flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    activeShift === 'turno2'
+                      ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-700 font-black'
+                      : 'bg-transparent text-slate-700 hover:text-slate-950 hover:bg-white/60'
+                  }`}
+                  title="Activar Turno 2 (Tarde) para registrar ventas"
+                >
+                  <span>🌇 T2</span>
+                  {activeShift === 'turno2' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1323,28 +1378,23 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                {/* Botón Desplegable / Selector Cliente Preferente */}
+                {/* Botón de Descuento 10% para Clientes Especiales (Sucursal Zakia) */}
                 <button
-                  id="toggle-preferente-btn"
+                  id="toggle-special-discount-btn"
                   type="button"
                   onClick={() => {
-                    playBeep(650, 'triangle', 0.05);
-                    setShowPreferentialPrices(!showPreferentialPrices);
+                    playBeep(isSpecialCustomerDiscount ? 450 : 750, 'triangle', 0.05);
+                    setIsSpecialCustomerDiscount(!isSpecialCustomerDiscount);
                   }}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer border shadow-xs active:scale-95 ${
-                    showPreferentialPrices
-                      ? 'bg-amber-500 text-amber-950 border-amber-600 ring-2 ring-amber-400'
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer border shadow-xs active:scale-95 ${
+                    isSpecialCustomerDiscount
+                      ? 'bg-amber-500 text-amber-950 border-amber-600 ring-2 ring-amber-400 font-black'
                       : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
                   }`}
-                  title="Mostrar Precios Especiales para Clientes Preferentes"
+                  title="Aplicar o remover 10% de descuento para clientes especiales de la sucursal"
                 >
-                  <Star className="w-3.5 h-3.5 fill-amber-600 text-amber-700" />
-                  <span>⭐ Precios Cliente Preferente</span>
-                  {showPreferentialPrices ? (
-                    <ChevronUp className="w-3.5 h-3.5 text-amber-950" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-amber-800" />
-                  )}
+                  <Star className={`w-3.5 h-3.5 ${isSpecialCustomerDiscount ? 'fill-amber-950 text-amber-950' : 'fill-amber-600 text-amber-700'}`} />
+                  <span>{isSpecialCustomerDiscount ? '⭐ 10% Especial: APLICADO' : '⭐ Descuento 10% Cliente Especial'}</span>
                 </button>
 
                 <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
@@ -1353,59 +1403,33 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               </div>
             </div>
 
-            {/* SECCIÓN PREFERENTE DESPLEGABLE (Precios: 4, 5, 6, 7, 12.50) */}
-            {showPreferentialPrices && (
-              <div className="p-2.5 bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-100/70 rounded-2xl border-2 border-amber-400 shadow-sm animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <Star className="w-5 h-5 fill-amber-500 text-amber-600 animate-bounce" />
-                    <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-950">
-                      ⭐ Tarifas Especiales - Cliente Preferente:
+            {/* BANNER INFORMATIVO: DESCUENTO 10% CLIENTE ESPECIAL ACTIVO */}
+            {isSpecialCustomerDiscount && (
+              <div className="p-2.5 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 rounded-2xl border-2 border-amber-400 shadow-xs flex flex-wrap items-center justify-between gap-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="flex items-center gap-2">
+                  <Star className="w-4 h-4 fill-amber-500 text-amber-700 shrink-0 animate-bounce" />
+                  <div>
+                    <span className="text-xs font-black text-amber-950 uppercase tracking-wide mr-1.5">
+                      ⭐ Descuento del 10% para Cliente Especial Activo:
                     </span>
-                    <span className="text-[10px] bg-amber-300 text-amber-950 font-black px-2 py-0.5 rounded-md border border-amber-400">
-                      Descuento Preferente
+                    <span className="text-xs text-amber-900 font-bold">
+                      Se descuenta el 10% automáticamente sobre todos los panes y productos del ticket.
                     </span>
                   </div>
-                  <span className="text-xs font-black text-amber-950 font-mono bg-amber-200/80 px-2 py-0.5 rounded-md">
-                    Toque directo (+{selectedMultiplier})
-                  </span>
                 </div>
-
-                <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-10 gap-1.5 sm:gap-2">
-                  {preferentialPrices.map((prefPrice) => {
-                    const labelPrice = formatMoneyLabel(prefPrice);
-                    return (
-                      <button
-                        key={prefPrice}
-                        id={`pref-price-btn-${prefPrice}`}
-                        type="button"
-                        onClick={() => handleAddPrice(prefPrice, `Pan Preferente ${labelPrice}`, `p_pref_${prefPrice}`)}
-                        className="group relative bg-white hover:bg-amber-100 border-2 border-amber-400 hover:border-amber-600 rounded-2xl p-1 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 lg:h-20 cursor-pointer"
-                      >
-                        <div className="absolute top-1 left-1.5">
-                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                        </div>
-                        <div className="absolute top-1 right-1.5">
-                          <span className="bg-amber-100 text-amber-950 px-1.5 py-0.5 rounded-md text-[10px] sm:text-xs border border-amber-300 font-black shadow-2xs font-mono">
-                            +{selectedMultiplier}
-                          </span>
-                        </div>
-
-                        <div className="text-2xl sm:text-3xl font-black text-amber-950 group-hover:text-amber-700 tracking-tight leading-none mt-2 font-mono">
-                          {labelPrice}
-                        </div>
-                        <div className="text-[9px] sm:text-[10px] font-black text-amber-900 leading-none truncate mt-1">
-                          Preferente
-                        </div>
-
-                        {selectedMultiplier > 1 && (
-                          <div className="absolute -top-2 -right-2 bg-amber-600 text-white text-xs font-black px-2 py-0.5 rounded-full shadow-md border-2 border-white font-mono">
-                            =${(selectedMultiplier * prefPrice).toFixed(prefPrice % 1 !== 0 ? 2 : 0)}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
+                <div className="flex items-center gap-2">
+                  {subtotal > 0 && (
+                    <span className="text-xs font-black bg-amber-200/90 text-amber-950 px-2.5 py-1 rounded-xl font-mono border border-amber-400 shadow-2xs">
+                      Ahorro cliente: -${specialCustomerDiscount.toFixed(2)}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsSpecialCustomerDiscount(false)}
+                    className="text-[11px] font-black text-amber-900 hover:text-amber-950 px-2 py-1 bg-white/80 hover:bg-white rounded-lg border border-amber-300 cursor-pointer"
+                  >
+                    Quitar Descuento
+                  </button>
                 </div>
               </div>
             )}
@@ -1481,8 +1505,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                 </span>
               </div>
 
-              {/* Botones Claros y Táctiles para Acompañamientos, Paleta desplegable y Postres */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2">
+              {/* Botones Claros y Táctiles para Acompañamientos, Granola y Postres */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2">
                 {/* 1. Leche 35 */}
                 <button
                   id="companion-btn-p_leche"
@@ -1567,29 +1591,6 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                   </div>
                   <div className="pt-2 text-xs sm:text-sm font-black text-amber-950 leading-tight">GRANOLA $150</div>
                   <div className="text-[9px] font-extrabold text-amber-700 leading-none mt-0.5">Artesanal</div>
-                </button>
-
-                {/* 5. PALETA (1 Solo Botón con 3 Precios Desplegables: 40, 45, 50) */}
-                <button
-                  id="companion-btn-paleta-dropdown"
-                  type="button"
-                  onClick={() => {
-                    playBeep(750, 'sine', 0.04);
-                    setShowPaletaModal(true);
-                  }}
-                  className="group relative bg-gradient-to-b from-cyan-50 to-sky-100 hover:from-cyan-100 hover:to-sky-200 border-2 border-cyan-400 hover:border-cyan-600 rounded-2xl p-1.5 flex flex-col items-center justify-center transition-all duration-150 active:scale-95 shadow-xs hover:shadow-md h-16 sm:h-18 cursor-pointer text-center"
-                  title="Toca para elegir entre precios de Paleta: $40, $45 y $50"
-                >
-                  <div className="absolute top-1 left-1.5 text-sm">🍧</div>
-                  <div className="absolute top-1 right-1.5">
-                    <ChevronDown className="w-3.5 h-3.5 text-cyan-800 group-hover:translate-y-0.5 transition-transform" />
-                  </div>
-                  <div className="pt-2 text-xs sm:text-sm font-black text-cyan-950 leading-tight flex items-center gap-0.5">
-                    PALETA
-                  </div>
-                  <div className="text-[9px] font-black text-cyan-900 leading-none bg-cyan-200/90 px-1.5 py-0.5 rounded-md mt-0.5 font-mono">
-                    $40 · 45 · 50
-                  </div>
                 </button>
 
                 {/* 6. POSTRES (Desplegable Gelatina 20 y Arroz con Leche 25) */}
@@ -1937,20 +1938,49 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               <div className="space-y-1 text-xs">
                 <div className="flex justify-between text-slate-600 font-bold text-xs sm:text-sm">
                   <span>Subtotal ({totalPieces} piezas):</span>
-                  <span className="font-mono font-black text-slate-900 text-sm sm:text-base">${subtotal}.00</span>
+                  <span className="font-mono font-black text-slate-900 text-sm sm:text-base">${subtotal.toFixed(2)}</span>
                 </div>
+
+                {specialCustomerDiscount > 0 && (
+                  <div className="flex justify-between items-center text-amber-950 bg-amber-100/80 px-2 py-1 rounded-xl border border-amber-400 font-black text-xs sm:text-sm animate-in fade-in">
+                    <span className="flex items-center gap-1">
+                      <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-700 shrink-0" />
+                      <span>Desc. Cliente Especial (10%):</span>
+                    </span>
+                    <span className="font-mono">-${specialCustomerDiscount.toFixed(2)}</span>
+                  </div>
+                )}
 
                 {actualDiscount > 0 && (
                   <div className="flex justify-between text-emerald-700 font-black text-xs sm:text-sm">
                     <span>Desc. Club ({actualDiscount} pts):</span>
-                    <span className="font-mono">-${actualDiscount}.00</span>
+                    <span className="font-mono">-${actualDiscount.toFixed(2)}</span>
                   </div>
+                )}
+
+                {/* Botón rápido 10% Cliente Especial en carrito */}
+                {ticketItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playBeep(isSpecialCustomerDiscount ? 450 : 750, 'triangle', 0.05);
+                      setIsSpecialCustomerDiscount(!isSpecialCustomerDiscount);
+                    }}
+                    className={`w-full py-1.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border active:scale-95 ${
+                      isSpecialCustomerDiscount
+                        ? 'bg-amber-500 text-amber-950 border-amber-600 ring-2 ring-amber-400 font-black'
+                        : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                    }`}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${isSpecialCustomerDiscount ? 'fill-amber-950 text-amber-950' : 'fill-amber-600 text-amber-700'}`} />
+                    <span>{isSpecialCustomerDiscount ? '⭐ Quitar Descuento 10%' : '⭐ Aplicar 10% Cliente Especial'}</span>
+                  </button>
                 )}
 
                 <div className="flex justify-between items-baseline pt-1 border-t-2 border-[#E5E1DA]">
                   <span className="text-sm sm:text-base font-black text-slate-950 uppercase tracking-tight">Total a Cobrar:</span>
                   <span className="text-4xl sm:text-5xl lg:text-6xl font-black text-[#D95D39] font-mono tracking-tight drop-shadow-xs">
-                    ${total}.00
+                    ${total.toFixed(2)}
                   </span>
                 </div>
 
@@ -2681,74 +2711,6 @@ export const PosCounter: React.FC<PosCounterProps> = ({
         </div>
       )}
 
-      {/* Modal / Selector Rápido de Paleta (40, 45, 50) */}
-      {showPaletaModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-sm w-full border-2 border-cyan-400 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-cyan-100">
-              <div className="flex items-center gap-2">
-                <span className="text-3xl">🍧</span>
-                <div>
-                  <h3 className="font-black text-lg text-slate-900 leading-tight">
-                    Seleccionar Paleta
-                  </h3>
-                  <p className="text-xs text-cyan-800 font-bold">
-                    Se agregarán {selectedMultiplier} {selectedMultiplier === 1 ? 'pieza' : 'piezas'}
-                  </p>
-                </div>
-              </div>
-              <button
-                id="close-paleta-modal-btn"
-                onClick={() => setShowPaletaModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2.5 my-4">
-              {[
-                { price: 40, emoji: '🍧', name: 'Paleta $40', desc: 'Agua / Fruta' },
-                { price: 45, emoji: '🍧', name: 'Paleta $45', desc: 'Crema / Especial' },
-                { price: 50, emoji: '🍦', name: 'Paleta $50', desc: 'Gourmet / Fina' }
-              ].map((opt) => (
-                <button
-                  key={opt.price}
-                  id={`paleta-opt-btn-${opt.price}`}
-                  type="button"
-                  onClick={() => {
-                    handleAddPrice(opt.price, opt.name, `p_paleta_${opt.price}`);
-                    setShowPaletaModal(false);
-                  }}
-                  className="group relative bg-gradient-to-b from-cyan-50 to-white hover:from-cyan-100 hover:to-cyan-50 border-2 border-cyan-300 hover:border-cyan-600 rounded-2xl p-2.5 flex flex-col items-center justify-center text-center transition-all active:scale-95 shadow-sm hover:shadow-md cursor-pointer h-28"
-                >
-                  <span className="text-2xl mb-1">{opt.emoji}</span>
-                  <span className="text-2xl font-black text-cyan-950 group-hover:text-cyan-700 tracking-tight">
-                    ${opt.price}
-                  </span>
-                  <span className="text-[9.5px] font-extrabold text-cyan-800 mt-0.5 leading-tight">
-                    {opt.desc}
-                  </span>
-                  {selectedMultiplier > 1 && (
-                    <span className="mt-1 bg-cyan-700 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-xs">
-                      =${selectedMultiplier * opt.price}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowPaletaModal(false)}
-              className="w-full py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 cursor-pointer"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Modal / Selector Rápido de Postres (Gelatina 20, Arroz con Leche 25) */}
       {showPostresModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2919,8 +2881,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                 <span>${directPrintTicket.subtotal.toFixed(2)}</span>
               </div>
               {directPrintTicket.discount > 0 && (
-                <div className="flex justify-between font-black">
-                  <span>DESCUENTO PUNTOS:</span>
+                <div className="flex justify-between font-black text-amber-900">
+                  <span>{directPrintTicket.isSpecialDiscount ? 'DESCUENTO (10% ESPECIAL):' : 'DESCUENTO PUNTOS:'}</span>
                   <span>-${directPrintTicket.discount.toFixed(2)}</span>
                 </div>
               )}

@@ -145,9 +145,6 @@ export const DEFAULT_PRODUCTS: BreadProduct[] = [
   { id: 'p_nata', name: 'Nata Artesanal', price: 90, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_queso', name: 'Queso de Rancho', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p_granola_150', name: 'Granola en $150', price: 150, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p_paleta_40', name: 'Paleta de Hielo $40', price: 40, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p_paleta_45', name: 'Paleta Especial $45', price: 45, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
-  { id: 'p_paleta_50', name: 'Paleta Gourmet $50', price: 50, category: 'Lácteos y Acompañamientos', isQuickPreset: true },
   { id: 'p100', name: 'Pastel Individual / Tarta Frutas', price: 100, category: 'Pasteles y Tartas', isQuickPreset: true },
   // Extra catalog items
   { id: 'p_concha_choco', name: 'Concha Especial Chocolate', price: 15, category: 'Pan Dulce Tradicional' },
@@ -604,7 +601,9 @@ export function loadProducts(): BreadProduct[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (raw) {
-      const stored: BreadProduct[] = JSON.parse(raw);
+      let stored: BreadProduct[] = JSON.parse(raw);
+      // In Sucursal Zakia no paletas are sold; filter out legacy paleta items
+      stored = stored.filter(p => !p.id.startsWith('p_paleta'));
       const existingIds = new Set(stored.map(p => p.id));
       let updated = false;
       DEFAULT_PRODUCTS.forEach(dp => {
@@ -867,11 +866,14 @@ export function generateTicketWhatsAppMessage(ticket: SaleTicket, settings: Sett
   text += `*DETALLE DE COMPRA:*\n`;
   text += `${itemsText}\n`;
   text += `--------------------------------\n`;
-  text += `Subtotal: $${ticket.subtotal}.00\n`;
+  text += `Subtotal: $${ticket.subtotal.toFixed(2)}\n`;
   if (ticket.discount > 0) {
-    text += `Descuento (Puntos): -$${ticket.discount}.00\n`;
+    const descLabel = ticket.pointsRedeemed && ticket.pointsRedeemed > 0 
+      ? 'Descuento (Puntos)' 
+      : 'Descuento Especial (10%)';
+    text += `${descLabel}: -$${ticket.discount.toFixed(2)}\n`;
   }
-  text += `*TOTAL PAGADO: $${ticket.total}.00*\n`;
+  text += `*TOTAL PAGADO: $${ticket.total.toFixed(2)}*\n`;
   text += `Método: ${ticket.paymentMethod === 'efectivo' ? '💵 Efectivo' : '💳 Tarjeta'}\n`;
   if (ticket.paymentMethod === 'efectivo' && ticket.amountPaid > 0) {
     text += `Pagó con: $${ticket.amountPaid}.00 | Cambio: $${ticket.change}.00\n`;

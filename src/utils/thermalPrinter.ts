@@ -168,7 +168,8 @@ export function buildTicketEscPosBytes(
   encoder.bold(true).twoColumns('SUBTOTAL:', `$${ticket.subtotal.toFixed(2)}`, width);
 
   if (ticket.discount > 0) {
-    encoder.bold(true).twoColumns('DESCUENTO PUNTOS:', `-$${ticket.discount.toFixed(2)}`, width);
+    const discLabel = ticket.pointsRedeemed && ticket.pointsRedeemed > 0 ? 'DESCUENTO PUNTOS:' : 'DESCUENTO (10% ESP):';
+    encoder.bold(true).twoColumns(discLabel, `-$${ticket.discount.toFixed(2)}`, width);
   }
 
   encoder
@@ -695,7 +696,7 @@ export function printTicketDirectToPrinter(ticket: SaleTicket, settings: Setting
           ticket.discount > 0
             ? `
           <div class="row">
-            <span>DESC. PUNTOS:</span>
+            <span>${ticket.pointsRedeemed && ticket.pointsRedeemed > 0 ? 'DESC. PUNTOS:' : 'DESC. ESPECIAL 10%:'}</span>
             <span class="val">-$${ticket.discount.toFixed(2)}</span>
           </div>
         `
