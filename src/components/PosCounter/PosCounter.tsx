@@ -65,6 +65,7 @@ import { HeartBreadCelebration } from '../HeartBreadCelebration';
 import { SmilingCheeseCubileteCelebration } from '../SmilingCheeseCubileteCelebration';
 import { CashShiftCutModal } from '../ShiftCut/CashShiftCutModal';
 import { ZettleBluetoothModal } from './ZettleBluetoothModal';
+import { ClipPaymentModal } from './ClipPaymentModal';
 
 interface PosCounterProps {
   products: BreadProduct[];
@@ -89,7 +90,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   onRegisterCustomer,
   onSaveOrder
 }) => {
-  // PayPal Zettle Terminal state
+  // Terminal Clip Wi-Fi & PayPal Zettle state
+  const [showClipModal, setShowClipModal] = useState<boolean>(false);
   const [showZettleModal, setShowZettleModal] = useState<boolean>(false);
   const [zettleDevice, setZettleDevice] = useState<ZettleDeviceInfo | null>(getZettleConnectionInfo());
   const [isConnectingZettlePos, setIsConnectingZettlePos] = useState<boolean>(false);
@@ -794,9 +796,9 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     setShowNewCustomerForm(false);
   };
 
-  // Process & Complete Sale with PayPal POS Zettle Card Terminal
-  const handleZettleCardCheckout = (cardDetails: {
-    terminal: 'zettle';
+  // Process & Complete Sale with Card Terminal (Clip Wi-Fi API or PayPal POS Zettle)
+  const handleCardCheckout = (cardDetails: {
+    terminal: 'clip' | 'zettle';
     authCode: string;
     last4?: string;
     reference?: string;
@@ -819,7 +821,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       discount: totalDiscount,
       total,
       paymentMethod: 'tarjeta',
-      cardTerminal: 'zettle',
+      cardTerminal: cardDetails.terminal || 'clip',
       cardAuthCode: cardDetails.authCode,
       cardLast4: cardDetails.last4,
       cardReference: cardDetails.reference || folio,
@@ -1973,20 +1975,20 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                 </div>
               )}
 
-              {/* BOTONES DE COBRO DEFINITIVOS EN EFECTIVO (Sin Tarjeta ni Pide y Recoge) */}
+              {/* BOTONES DE COBRO DEFINITIVOS: 3 BOTONES EN LA MISMA FILA (Sin Ticket, Con Ticket, Tarjeta) */}
               <div className="space-y-1 pt-0.5">
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-3 gap-1 sm:gap-1.5">
                   {/* Botón 1: Cobro Rápido Sin Ticket */}
                   <button
                     id="quick-checkout-no-ticket-btn"
                     type="button"
                     disabled={ticketItems.length === 0}
                     onClick={handleQuickCheckoutWithoutTicket}
-                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-1.5 sm:py-2 px-2 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer border border-emerald-500 text-center"
+                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-2 px-1 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5 text-center cursor-pointer border border-emerald-500 min-h-[46px]"
                     title="Registrar venta en efectivo sin imprimir ticket (animación de dona sonriente)"
                   >
-                    <span className="text-base sm:text-lg">🍩</span>
-                    <span className="leading-tight">Sin Ticket</span>
+                    <span className="text-sm leading-none">🍩</span>
+                    <span className="text-[11px] sm:text-xs font-black leading-tight whitespace-nowrap">Sin Ticket</span>
                   </button>
 
                   {/* Botón 2: Cobrar con Ticket Térmico */}
@@ -1995,11 +1997,28 @@ export const PosCounter: React.FC<PosCounterProps> = ({
                     type="button"
                     disabled={ticketItems.length === 0}
                     onClick={() => handleCompleteSale()}
-                    className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] hover:from-[#BF4C2A] hover:to-[#9E3B1C] disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-1.5 sm:py-2 px-2 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer border border-[#BF4C2A] text-center"
+                    className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] hover:from-[#BF4C2A] hover:to-[#9E3B1C] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-2 px-1 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5 text-center cursor-pointer border border-[#BF4C2A] min-h-[46px]"
                     title="Cobrar en efectivo e imprimir ticket térmico directo"
                   >
                     <Printer className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
-                    <span className="leading-tight">Cobrar Ticket 🖨️</span>
+                    <span className="text-[11px] sm:text-xs font-black leading-tight whitespace-nowrap">Con Ticket</span>
+                  </button>
+
+                  {/* Botón 3: Cobrar con Tarjeta / Clip Wi-Fi */}
+                  <button
+                    id="checkout-card-btn"
+                    type="button"
+                    disabled={ticketItems.length === 0}
+                    onClick={() => {
+                      if (ticketItems.length === 0) return;
+                      playBeep(750, 'sine', 0.05);
+                      setShowClipModal(true);
+                    }}
+                    className="bg-gradient-to-r from-[#FF5A00] to-[#E04D00] hover:from-[#E04D00] hover:to-[#C43E00] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-2 px-1 rounded-xl shadow-xs hover:shadow transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5 text-center cursor-pointer border border-[#E04D00] min-h-[46px]"
+                    title="Cobrar automáticamente con terminal Clip Wi-Fi o tarjeta bancaria"
+                  >
+                    <CreditCard className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                    <span className="text-[11px] sm:text-xs font-black leading-tight whitespace-nowrap">Tarjeta 💳</span>
                   </button>
                 </div>
 
@@ -2026,32 +2045,46 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       {/* Mobile Floating Sticky Checkout Bar (Only on small screens when ticket has items so buttons never get lost) */}
       {ticketItems.length > 0 && (
         <div className="lg:hidden fixed bottom-3 left-2 right-2 z-40 bg-[#2D3142] text-white p-2 rounded-2xl shadow-2xl border-2 border-white/20 flex items-center justify-between gap-1.5 animate-in slide-in-from-bottom-5">
-          <div className="flex flex-col pl-1 min-w-[55px]">
+          <div className="flex flex-col pl-1 min-w-[48px] shrink-0">
             <span className="text-[9px] text-slate-300 font-bold uppercase">{totalPieces} pzs</span>
-            <span className="text-base font-black text-amber-400 leading-none">${total}.00</span>
+            <span className="text-sm sm:text-base font-black text-amber-400 leading-none">${total}.00</span>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-1 justify-end">
+          <div className="grid grid-cols-3 gap-1 flex-1">
             <button
               id="mobile-quick-checkout-no-ticket-btn"
               type="button"
               onClick={handleQuickCheckoutWithoutTicket}
-              className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-black text-xs py-2 px-3 rounded-xl shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer border border-emerald-400 whitespace-nowrap"
+              className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-black text-[11px] py-2 px-1 rounded-xl shadow-xs flex items-center justify-center gap-1 active:scale-95 cursor-pointer border border-emerald-400 whitespace-nowrap"
               title="Cobro rápido sin ticket"
             >
               <span>🍩</span>
-              <span>Sin Ticket</span>
+              <span className="truncate">Sin Ticket</span>
             </button>
 
             <button
               id="mobile-checkout-print-btn"
               type="button"
               onClick={() => handleCompleteSale()}
-              className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] text-white font-black text-xs py-2 px-3 rounded-xl shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer border border-[#BF4C2A] whitespace-nowrap"
+              className="bg-gradient-to-r from-[#D95D39] to-[#BF4C2A] text-white font-black text-[11px] py-2 px-1 rounded-xl shadow-xs flex items-center justify-center gap-1 active:scale-95 cursor-pointer border border-[#BF4C2A] whitespace-nowrap"
               title="Cobrar con ticket"
             >
-              <Printer className="w-3.5 h-3.5 shrink-0" />
-              <span>Cobrar Ticket</span>
+              <Printer className="w-3 h-3 shrink-0" />
+              <span className="truncate">Con Ticket</span>
+            </button>
+
+            <button
+              id="mobile-checkout-card-btn"
+              type="button"
+              onClick={() => {
+                playBeep(750, 'sine', 0.05);
+                setShowClipModal(true);
+              }}
+              className="bg-gradient-to-r from-[#FF5A00] to-[#E04D00] text-white font-black text-[11px] py-2 px-1 rounded-xl shadow-xs flex items-center justify-center gap-1 active:scale-95 cursor-pointer border border-[#E04D00] whitespace-nowrap"
+              title="Cobrar con terminal Clip Wi-Fi"
+            >
+              <CreditCard className="w-3 h-3 shrink-0" />
+              <span className="truncate">Tarjeta</span>
             </button>
           </div>
         </div>
@@ -2882,14 +2915,14 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               <div className="flex justify-between text-[11px] font-black pt-0.5">
                 <span>PAGO:</span>
                 <span className="uppercase font-black">
-                  {directPrintTicket.paymentMethod === 'efectivo' ? 'EFECTIVO' : 'TARJETA / ZETTLE'}
+                  {directPrintTicket.paymentMethod === 'efectivo' ? 'EFECTIVO' : 'TARJETA'}
                 </span>
               </div>
               {directPrintTicket.paymentMethod === 'tarjeta' && (
                 <>
                   <div className="flex justify-between text-[10px] font-black">
                     <span>TERMINAL:</span>
-                    <span>PAYPAL ZETTLE (BT)</span>
+                    <span>{directPrintTicket.cardTerminal === 'clip' ? 'CLIP WI-FI (API)' : (directPrintTicket.cardTerminal === 'zettle' ? 'PAYPAL ZETTLE (BT)' : 'TERMINAL BANCARIA')}</span>
                   </div>
                   {directPrintTicket.cardAuthCode && (
                     <div className="flex justify-between text-[10px] font-black">
@@ -3622,6 +3655,21 @@ export const PosCounter: React.FC<PosCounterProps> = ({
         />
       )}
 
+      {/* Ventana de Cobro con Terminal Clip Wi-Fi (Automático) */}
+      {showClipModal && (
+        <ClipPaymentModal
+          isOpen={showClipModal}
+          amount={total}
+          folio={getNextTicketFolio()}
+          customerName={selectedCustomer ? selectedCustomer.name : (phoneSearch.replace(/\D/g, '') ? `Tel: ${phoneSearch.replace(/\D/g, '')}` : undefined)}
+          onClose={() => setShowClipModal(false)}
+          onPaymentApproved={(cardDetails) => {
+            setShowClipModal(false);
+            handleCardCheckout(cardDetails);
+          }}
+        />
+      )}
+
       {/* Ventana de Cobro con Terminal PayPal Zettle por Bluetooth */}
       {showZettleModal && (
         <ZettleBluetoothModal
@@ -3630,7 +3678,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
           folio={getNextTicketFolio()}
           customerName={selectedCustomer ? selectedCustomer.name : (phoneSearch.replace(/\D/g, '') ? `Tel: ${phoneSearch.replace(/\D/g, '')}` : undefined)}
           onClose={() => setShowZettleModal(false)}
-          onPaymentApproved={(cardDetails) => handleZettleCardCheckout(cardDetails)}
+          onPaymentApproved={(cardDetails) => handleCardCheckout(cardDetails)}
+          onConfirmCardPayment={(cardDetails) => handleCardCheckout(cardDetails)}
         />
       )}
     </div>

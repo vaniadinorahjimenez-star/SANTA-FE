@@ -29,19 +29,29 @@ interface ZettleBluetoothModalProps {
   amount: number;
   folio: string;
   onClose: () => void;
-  onConfirmCardPayment: (details: {
+  onConfirmCardPayment?: (details: {
     terminal: 'zettle';
     authCode: string;
     last4?: string;
     reference?: string;
   }) => void;
+  onPaymentApproved?: (details: {
+    terminal: 'zettle';
+    authCode: string;
+    last4?: string;
+    reference?: string;
+  }) => void;
+  isOpen?: boolean;
+  customerName?: string;
 }
 
 export const ZettleBluetoothModal: React.FC<ZettleBluetoothModalProps> = ({
   amount,
   folio,
   onClose,
-  onConfirmCardPayment
+  onConfirmCardPayment,
+  onPaymentApproved,
+  customerName
 }) => {
   const [deviceInfo, setDeviceInfo] = useState<ZettleDeviceInfo | null>(getZettleConnectionInfo());
   const [isConnecting, setIsConnecting] = useState(false);
@@ -108,12 +118,18 @@ export const ZettleBluetoothModal: React.FC<ZettleBluetoothModalProps> = ({
 
   const handleFinalize = () => {
     playCashSound();
-    onConfirmCardPayment({
-      terminal: 'zettle',
+    const details = {
+      terminal: 'zettle' as const,
       authCode: authCode.trim() || generateZettleAuthCode(),
       last4: cardLast4.trim() || undefined,
       reference: folio
-    });
+    };
+    if (onConfirmCardPayment) {
+      onConfirmCardPayment(details);
+    }
+    if (onPaymentApproved) {
+      onPaymentApproved(details);
+    }
   };
 
   return (

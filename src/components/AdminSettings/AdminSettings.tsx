@@ -30,11 +30,14 @@ import {
   CreditCard,
   Building2,
   X,
-  BookOpen
+  BookOpen,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { playBeep, playCashSound } from '../../utils/audio';
 import { printViaBluetooth, printViaUsbTypeB, printViaUsbSerial, printViaRawBtIntent } from '../../utils/thermalPrinter';
 import { getTodayString, getNowTimeString, loadDriverCustomers, saveDriverCustomers } from '../../utils/storage';
+import { getStoredClipConfig, saveClipConfig } from '../../services/clipService';
 
 interface AdminSettingsProps {
   settings: Settings;
@@ -97,6 +100,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [printerStatus, setPrinterStatus] = useState<string>('');
   const [isTestingPrinter, setIsTestingPrinter] = useState<boolean>(false);
   const [printerFeedback, setPrinterFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Clip Terminal Wi-Fi state
+  const [clipConfig, setClipConfig] = useState(getStoredClipConfig);
 
   const createDummyTicket = (): SaleTicket => ({
     id: `test-${Date.now()}`,
@@ -1369,6 +1375,84 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 <Smartphone className="w-6 h-6 text-emerald-600 mb-1.5" />
                 <strong className="text-xs font-bold text-slate-900">Probar con RawBT</strong>
                 <span className="text-[10px] text-slate-500 mt-0.5">App de Android para tickets</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Configuración de Terminal Clip Wi-Fi (Cobro Automático F2F API) */}
+          <div className="bg-white rounded-3xl p-6 shadow-sm border border-orange-200 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#FF5A00]">
+                  <Wifi className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Terminal Clip con Wi-Fi (Cobro Automático API)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Conexión directa a terminales Clip (Stand, Pro 2, Total) vía Netlify Function y Wi-Fi
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Número de Serie de la Terminal Clip:
+                </label>
+                <input
+                  type="text"
+                  value={clipConfig.serialNumber}
+                  onChange={(e) => {
+                    const updated = { ...clipConfig, serialNumber: e.target.value };
+                    setClipConfig(updated);
+                    saveClipConfig(updated);
+                  }}
+                  placeholder="Ej. 08221800012345 o N600-XXXXX"
+                  className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs font-bold focus:ring-2 focus:ring-orange-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Lo encuentras en la etiqueta trasera de tu terminal Clip o en Ajustes → Acerca del dispositivo.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nombre Identificador de la Terminal:
+                </label>
+                <input
+                  type="text"
+                  value={clipConfig.terminalName || ''}
+                  onChange={(e) => {
+                    const updated = { ...clipConfig, terminalName: e.target.value };
+                    setClipConfig(updated);
+                    saveClipConfig(updated);
+                  }}
+                  placeholder="Ej. Clip Total Caja Mostrador"
+                  className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 text-xs font-bold focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-orange-50/70 border border-orange-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div className="text-xs text-slate-700">
+                <strong className="text-orange-900 block font-bold">Netlify Function Activa:</strong>
+                <span className="text-[11px] font-mono text-slate-600">/.netlify/functions/clip-payment</span>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Para cobros reales, define la variable <strong>CLIP_API_KEY</strong> en tu panel de Netlify (Site Settings → Environment Variables).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  playBeep(800, 'sine', 0.04);
+                  alert(`Configuración de Clip guardada exitosamente.\nSerie: ${clipConfig.serialNumber}`);
+                }}
+                className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black px-4 py-2 rounded-xl text-xs shadow-xs cursor-pointer shrink-0"
+              >
+                Guardar Terminal
               </button>
             </div>
           </div>
