@@ -9,6 +9,17 @@ export interface ClipConfig {
   autoPrintReceipt?: boolean;
 }
 
+export type ClipErrorType = 
+  | 'NETLIFY_REDEPLOY_NEEDED'
+  | 'CLIP_AUTH_ERROR'
+  | 'DEVICE_NOT_FOUND'
+  | 'TERMINAL_OFFLINE'
+  | 'TERMINAL_TIMEOUT'
+  | 'TERMINAL_BUSY'
+  | 'INVALID_CONFIG'
+  | 'CANCELLED'
+  | 'UNKNOWN';
+
 export interface ClipPaymentResult {
   success: boolean;
   pinpadRequestId?: string;
@@ -16,8 +27,10 @@ export interface ClipPaymentResult {
   last4?: string;
   reference?: string;
   status?: 'APPROVED' | 'PENDING' | 'CANCELLED' | 'DECLINED' | 'TIMEOUT' | 'FAILED';
-  errorType?: 'TERMINAL_OFFLINE' | 'TERMINAL_TIMEOUT' | 'TERMINAL_BUSY' | 'INVALID_CONFIG' | 'CANCELLED' | 'UNKNOWN';
+  errorType?: ClipErrorType;
   message?: string;
+  httpStatus?: number;
+  details?: any;
   isMock?: boolean;
 }
 
@@ -37,7 +50,7 @@ export function getStoredClipConfig(): ClipConfig {
     console.error('Error al leer configuración de Clip:', e);
   }
   return {
-    serialNumber: '08221800012345', // Número de serie de ejemplo
+    serialNumber: 'P8C22408050000156',
     terminalName: 'Clip Total Wi-Fi (Caja)',
     autoPrintReceipt: true
   };
@@ -60,20 +73,22 @@ export function saveClipConfig(config: Partial<ClipConfig>): void {
 export async function sendPaymentToClipTerminal(
   amount: number,
   reference: string
-): Promise<{ success: boolean; pinpadRequestId?: string; errorType?: string; message?: string; isMock?: boolean }> {
+): Promise<{
+  success: boolean;
+  pinpadRequestId?: string;
+  errorType?: ClipErrorType;
+  message?: string;
+  httpStatus?: number;
+  details?: any;
+  isMock?: boolean;
+}> {
   const config = getStoredClipConfig();
-
-  if (!config.serialNumber || !config.serialNumber.trim()) {
-    return {
-      success: false,
-      errorType: 'INVALID_CONFIG',
-      message: 'Falta configurar el número de serie de tu terminal Clip (ej. N600-XXXXX o 0822...).'
-    };
-  }
+  const serial = config.serialNumber?.trim() || 'P8C22408050000156';
 
   try {
-    // Llamada a la Netlify Function
-    const response = await fetch('/.netlify/functions/clip-payment', {
+    // Intentamos primero /.netlify/functions/clip-payment y como respaldo /api/clip-payment
+    const endpoint = '/.netlify/functions/clip-payment';
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -82,40 +97,28 @@ export async function sendPaymentToClipTerminal(
         action: 'create_payment',
         amount,
         reference,
-        serial_number_pos: config.serialNumber.trim()
+        serial_number_pos: serial
       })
     });
 
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      // Manejo específico de terminal apagada o sin señal
-      if (response.status === 503 || data.error === 'TERMINAL_OFFLINE') {
-        return {
-          success: false,
-          errorType: 'TERMINAL_OFFLINE',
-          message: data.message || 'La terminal Clip está apagada o sin señal Wi-Fi.'
-        };
-      }
-      if (response.status === 504 || data.error === 'TERMINAL_TIMEOUT') {
-        return {
-          success: false,
-          errorType: 'TERMINAL_TIMEOUT',
-          message: data.message || 'Tiempo de espera agotado: no se pudo contactar a la terminal Clip.'
-        };
-      }
-      if (response.status === 409 || data.error === 'TERMINAL_BUSY') {
-        return {
-          success: false,
-          errorType: 'TERMINAL_BUSY',
-          message: data.message || 'La terminal Clip está ocupada con otra transacción.'
-        };
-      }
+      const errType: ClipErrorType = 
+        data.error === 'NETLIFY_REDEPLOY_NEEDED' ? 'NETLIFY_REDEPLOY_NEEDED' :
+        data.error === 'CLIP_AUTH_ERROR' ? 'CLIP_AUTH_ERROR' :
+        data.error === 'DEVICE_NOT_FOUND' ? 'DEVICE_NOT_FOUND' :
+        data.error === 'TERMINAL_OFFLINE' ? 'TERMINAL_OFFLINE' :
+        data.error === 'TERMINAL_BUSY' ? 'TERMINAL_BUSY' :
+        data.error === 'TERMINAL_TIMEOUT' ? 'TERMINAL_TIMEOUT' :
+        'UNKNOWN';
 
       return {
         success: false,
-        errorType: data.error || 'ERROR_PETICION',
-        message: data.message || `Error del servidor Clip (${response.status})`
+        errorType: errType,
+        httpStatus: response.status,
+        message: data.message || `Error del servidor Clip (${response.status})`,
+        details: data.details || data
       };
     }
 
@@ -127,8 +130,6 @@ export async function sendPaymentToClipTerminal(
 
   } catch (err: any) {
     console.warn('Fallo de red al conectar con Netlify Function:', err);
-    // Si la función de Netlify no responde (ej. en desarrollo local sin netlify dev),
-    // detectamos si es un error de conexión de red
     return {
       success: false,
       errorType: 'TERMINAL_TIMEOUT',
@@ -144,7 +145,7 @@ export async function pollClipPaymentStatus(
   pinpadRequestId: string,
   onStatusUpdate: (statusText: string) => void,
   signal?: AbortSignal,
-  maxAttempts: number = 30 // 30 intentos * 2.5s = ~75 segundos de espera para que el cliente pase la tarjeta
+  maxAttempts: number = 30 // 30 intentos * 2.5s = ~75 segundos
 ): Promise<ClipPaymentResult> {
   let attempts = 0;
 
@@ -219,4 +220,48 @@ export async function pollClipPaymentStatus(
     errorType: 'TERMINAL_TIMEOUT',
     message: 'Tiempo de espera agotado. El cliente no insertó o acercó su tarjeta a tiempo.'
   };
+}
+
+/**
+ * Diagnosticar conexión con Clip y estado de Netlify
+ */
+export async function diagnoseClipConnection(serialNumber?: string): Promise<{
+  success: boolean;
+  status: string;
+  message?: string;
+  diagnosis?: any;
+  clip_http_status?: number;
+  clip_response?: any;
+  advice?: string;
+}> {
+  try {
+    const config = getStoredClipConfig();
+    const serial = serialNumber || config.serialNumber || 'P8C22408050000156';
+
+    const response = await fetch('/.netlify/functions/clip-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'diagnose',
+        serial_number_pos: serial
+      })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    return {
+      success: response.ok,
+      status: data.status || `HTTP_${response.status}`,
+      message: data.message,
+      diagnosis: data.diagnosis,
+      clip_http_status: data.clip_http_status,
+      clip_response: data.clip_response,
+      advice: data.advice
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      status: 'FETCH_ERROR',
+      message: err.message || 'No se pudo contactar la función de Netlify.'
+    };
+  }
 }

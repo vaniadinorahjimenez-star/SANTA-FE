@@ -11,14 +11,20 @@ import {
   ArrowRight,
   ShieldCheck,
   Zap,
-  Smartphone
+  Smartphone,
+  KeyRound,
+  ExternalLink,
+  Activity,
+  HelpCircle
 } from 'lucide-react';
 import { 
   getStoredClipConfig, 
   saveClipConfig, 
   sendPaymentToClipTerminal, 
   pollClipPaymentStatus, 
-  ClipPaymentResult 
+  diagnoseClipConnection,
+  ClipPaymentResult,
+  ClipErrorType
 } from '../../services/clipService';
 
 interface ClipPaymentModalProps {
@@ -36,13 +42,17 @@ interface ClipPaymentModalProps {
 }
 
 type PaymentStep = 
-  | 'INITIATING'        // Enviando a la terminal
-  | 'AWAITING_CARD'     // Esperando que el cliente pase la tarjeta en la terminal
-  | 'APPROVED'          // Aprobado
-  | 'OFFLINE_ERROR'     // Terminal apagada o sin señal Wi-Fi
-  | 'TIMEOUT_ERROR'     // Tiempo agotado
-  | 'BUSY_ERROR'        // Terminal ocupada
-  | 'MANUAL_AUTH';      // Fallback de autorización manual
+  | 'INITIATING'             // Enviando a la terminal
+  | 'AWAITING_CARD'          // Esperando que el cliente pase la tarjeta en la terminal
+  | 'APPROVED'               // Aprobado
+  | 'NETLIFY_REDEPLOY_ERROR' // Faltó hacer deploy en Netlify tras guardar variables
+  | 'AUTH_ERROR'             // Error 401: API Key inválida o mal formateada
+  | 'SERIAL_NOT_FOUND'       // Error 404/400: La serie no está en la cuenta Clip
+  | 'OFFLINE_ERROR'          // Terminal apagada o sin señal Wi-Fi
+  | 'TIMEOUT_ERROR'          // Tiempo agotado
+  | 'BUSY_ERROR'             // Terminal ocupada
+  | 'DIAGNOSTIC'             // Diagnóstico en vivo
+  | 'MANUAL_AUTH';           // Fallback de autorización manual
 
 export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   isOpen,
@@ -55,6 +65,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   const [step, setStep] = useState<PaymentStep>('INITIATING');
   const [statusMessage, setStatusMessage] = useState<string>('Conectando con la terminal Clip...');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [errorDetails, setErrorDetails] = useState<any>(null);
   const [authCode, setAuthCode] = useState<string>('');
   const [last4, setLast4] = useState<string>('');
   const [isEditingSerial, setIsEditingSerial] = useState<boolean>(false);
@@ -66,6 +77,10 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   const [manualAuthCode, setManualAuthCode] = useState<string>('');
   const [manualLast4, setManualLast4] = useState<string>('');
 
+  // Diagnóstico
+  const [diagnosticLoading, setDiagnosticLoading] = useState<boolean>(false);
+  const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Inicializar y lanzar el cobro automático al abrir el modal
@@ -74,11 +89,10 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
 
     const stored = getStoredClipConfig();
     setConfig(stored);
-    setSerialInput(stored.serialNumber);
+    setSerialInput(stored.serialNumber || 'P8C22408050000156');
     startClipTransaction();
 
     return () => {
-      // Abortar peticiones activas si el usuario cierra el modal
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -86,7 +100,6 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   }, [isOpen]);
 
   const startClipTransaction = async () => {
-    // Cancelar cualquier proceso previo
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -96,16 +109,34 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     setStep('INITIATING');
     setStatusMessage('Enviando monto a la terminal Clip por Wi-Fi...');
     setErrorMessage('');
+    setErrorDetails(null);
 
     const sendRes = await sendPaymentToClipTerminal(amount, folio);
 
     if (!sendRes.success) {
-      if (sendRes.errorType === 'TERMINAL_OFFLINE') {
+      setErrorDetails(sendRes.details);
+      
+      if (sendRes.errorType === 'NETLIFY_REDEPLOY_NEEDED') {
+        setStep('NETLIFY_REDEPLOY_ERROR');
+        setErrorMessage(
+          sendRes.message || 'Se requiere desplegar nuevamente el sitio en Netlify para aplicar tus variables.'
+        );
+      } else if (sendRes.errorType === 'CLIP_AUTH_ERROR' || sendRes.httpStatus === 401) {
+        setStep('AUTH_ERROR');
+        setErrorMessage(
+          sendRes.message || 'Clip no reconoció la clave de autorización (Error 401). Verifica CLIP_API_KEY.'
+        );
+      } else if (sendRes.errorType === 'DEVICE_NOT_FOUND' || sendRes.httpStatus === 404) {
+        setStep('SERIAL_NOT_FOUND');
+        setErrorMessage(
+          sendRes.message || `La terminal con serie "${config.serialNumber}" no fue encontrada en tu cuenta de Clip.`
+        );
+      } else if (sendRes.errorType === 'TERMINAL_OFFLINE' || sendRes.httpStatus === 503) {
         setStep('OFFLINE_ERROR');
         setErrorMessage(
           sendRes.message || 'La terminal Clip está apagada, en reposo o sin señal Wi-Fi.'
         );
-      } else if (sendRes.errorType === 'TERMINAL_BUSY') {
+      } else if (sendRes.errorType === 'TERMINAL_BUSY' || sendRes.httpStatus === 409) {
         setStep('BUSY_ERROR');
         setErrorMessage(
           sendRes.message || 'La terminal Clip está ocupada con otra transacción.'
@@ -113,7 +144,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
       } else {
         setStep('OFFLINE_ERROR');
         setErrorMessage(
-          sendRes.message || 'No fue posible contactar a la terminal Clip.'
+          sendRes.message || 'No fue posible contactar a la terminal Clip. Verifica tu conexión Wi-Fi.'
         );
       }
       return;
@@ -121,7 +152,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
 
     setIsMockSimulation(Boolean(sendRes.isMock));
     setStep('AWAITING_CARD');
-    setStatusMessage('Esperando que el cliente acerque, inserte o deslice su tarjeta...');
+    setStatusMessage('Esperando que el cliente acerque, inserte o deslice su tarjeta en la pantalla Clip...');
 
     // Iniciar sondeo (polling) del estado en la terminal
     const pollRes: ClipPaymentResult = await pollClipPaymentStatus(
@@ -137,7 +168,6 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
       setLast4(generatedLast4);
       setStep('APPROVED');
 
-      // Esperar 1.2 segundos para mostrar la confirmación visual y completar la venta
       setTimeout(() => {
         onPaymentApproved({
           terminal: 'clip',
@@ -148,7 +178,6 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
       }, 1200);
     } else {
       if (pollRes.errorType === 'CANCELLED') {
-        // Cancelado intencionalmente
         return;
       }
       if (pollRes.errorType === 'TERMINAL_TIMEOUT' || pollRes.status === 'TIMEOUT') {
@@ -161,72 +190,72 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     }
   };
 
-  const handleSaveSerial = () => {
+  const handleSaveSerial = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!serialInput.trim()) return;
-    saveClipConfig({ serialNumber: serialInput.trim() });
-    setConfig(getStoredClipConfig());
+    const updated = { ...config, serialNumber: serialInput.trim() };
+    setConfig(updated);
+    saveClipConfig(updated);
     setIsEditingSerial(false);
     startClipTransaction();
   };
 
   const handleManualAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const finalAuth = manualAuthCode.trim() || 'CLIP-MAN-' + Math.floor(100000 + Math.random() * 900000);
-    const finalLast4 = manualLast4.trim() || '••••';
+    if (!manualAuthCode.trim()) return;
 
-    setAuthCode(finalAuth);
-    setLast4(finalLast4);
-    setStep('APPROVED');
-
-    setTimeout(() => {
-      onPaymentApproved({
-        terminal: 'clip',
-        authCode: finalAuth,
-        last4: finalLast4,
-        reference: folio
-      });
-    }, 600);
+    onPaymentApproved({
+      terminal: 'clip',
+      authCode: manualAuthCode.trim().toUpperCase(),
+      last4: manualLast4.trim() || undefined,
+      reference: folio
+    });
   };
 
-  // Simulación rápida para pruebas en mostrador cuando se usa modo demo
   const handleForceApproveDemo = () => {
-    const demoAuth = 'CLIP-' + Math.floor(100000 + Math.random() * 900000);
-    const demoLast4 = '5492';
-    setAuthCode(demoAuth);
-    setLast4(demoLast4);
+    const dummyAuth = 'CLIP-DEMO-' + Math.floor(1000 + Math.random() * 9000);
+    setAuthCode(dummyAuth);
+    setLast4('4242');
     setStep('APPROVED');
-
     setTimeout(() => {
       onPaymentApproved({
         terminal: 'clip',
-        authCode: demoAuth,
-        last4: demoLast4,
+        authCode: dummyAuth,
+        last4: '4242',
         reference: folio
       });
     }, 800);
   };
 
+  const runDiagnostic = async () => {
+    setStep('DIAGNOSTIC');
+    setDiagnosticLoading(true);
+    const result = await diagnoseClipConnection(config.serialNumber);
+    setDiagnosticResult(result);
+    setDiagnosticLoading(false);
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border-2 border-orange-500/20 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden flex flex-col">
         
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-[#FF5A00] to-[#E04D00] text-white px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center font-bold shadow-inner">
+        <div className="bg-gradient-to-r from-[#FF5A00] to-[#E04D00] p-5 text-white flex items-center justify-between relative shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center backdrop-blur-xs">
               <CreditCard className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <h3 className="text-base font-black tracking-tight leading-none">Terminal Clip Wi-Fi</h3>
-                <span className="bg-white/25 text-[10px] uppercase font-black px-1.5 py-0.5 rounded-full tracking-wider">
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-base tracking-tight leading-tight">Terminal Clip Wi-Fi</h3>
+                <span className="text-[10px] bg-white/25 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">
                   Automático
                 </span>
               </div>
-              <p className="text-xs text-white/90 font-medium mt-0.5">
-                {config.terminalName || 'Clip Stand / Pro / Total'}
+              <p className="text-xs text-orange-100 font-medium">
+                {config.terminalName || 'Clip Total Wi-Fi (Caja)'}
               </p>
             </div>
           </div>
@@ -234,108 +263,99 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-black/15 hover:bg-black/30 flex items-center justify-center transition-colors cursor-pointer text-white"
-            title="Cerrar ventana"
+            className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center cursor-pointer transition-colors"
           >
-            <X className="w-4 h-4 stroke-[2.5]" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Resumen del Monto a Cobrar */}
-        <div className="bg-[#FAF8F6] border-b border-[#E5E1DA] px-5 py-3.5 flex items-center justify-between">
+        {/* Resumen del cobro */}
+        <div className="px-6 py-4 bg-orange-50/60 border-b border-orange-100 flex items-center justify-between">
           <div>
-            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 block">
-              Folio {folio} {customerName ? `• ${customerName}` : ''}
+            <span className="text-[11px] font-bold text-orange-800 uppercase tracking-wider block">
+              Folio {folio}
             </span>
-            <span className="text-xs font-semibold text-slate-700">Total a cobrar:</span>
+            <span className="text-xs text-slate-500 font-medium">
+              Total a cobrar:
+            </span>
           </div>
           <div className="text-right">
-            <span className="text-3xl font-black text-slate-900 font-mono tracking-tight">
+            <span className="text-2xl font-black text-slate-900 tracking-tight">
               ${amount.toFixed(2)}
             </span>
-            <span className="text-[10px] font-bold text-slate-500 block">MXN</span>
+            <span className="text-[10px] text-slate-400 font-bold block">MXN</span>
           </div>
         </div>
 
-        {/* Serial Number / Info de Conexión */}
-        <div className="px-5 py-2 bg-slate-50 border-b border-slate-200/70 flex items-center justify-between text-xs text-slate-600">
-          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+        {/* Info de la Terminal y botón para cambiar serie */}
+        <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1.5 text-slate-600 font-mono text-[11px]">
             <Wifi className="w-3.5 h-3.5 text-emerald-600" />
             <span>Serie: <strong>{config.serialNumber}</strong></span>
           </div>
+
           <button
             type="button"
             onClick={() => setIsEditingSerial(!isEditingSerial)}
-            className="text-[11px] text-[#FF5A00] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+            className="text-[11px] font-bold text-orange-600 hover:text-orange-700 cursor-pointer flex items-center gap-1"
           >
             <Sliders className="w-3 h-3" />
             {isEditingSerial ? 'Cerrar' : 'Cambiar terminal'}
           </button>
         </div>
 
-        {/* Formulario para cambiar número de serie */}
+        {/* Edición rápida de número de serie */}
         {isEditingSerial && (
-          <div className="p-4 bg-orange-50/70 border-b border-orange-200 text-xs">
-            <label className="block font-bold text-slate-800 mb-1">
-              Número de Serie de tu Terminal Clip (impreso en la parte trasera):
+          <form onSubmit={handleSaveSerial} className="p-4 bg-slate-100 border-b border-slate-200 space-y-2">
+            <label className="block text-xs font-bold text-slate-700">
+              Número de Serie de la Terminal Clip (P8C... o etiqueta trasera):
             </label>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               <input
                 type="text"
                 value={serialInput}
                 onChange={(e) => setSerialInput(e.target.value)}
-                placeholder="Ej. 08221800012345 o N600-XXXXX"
-                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-[#FF5A00]"
+                placeholder="Ej. P8C22408050000156"
+                className="flex-1 px-3 py-1.5 bg-white rounded-xl border border-slate-300 text-xs font-mono font-bold focus:ring-2 focus:ring-orange-500"
               />
               <button
-                type="button"
-                onClick={handleSaveSerial}
-                className="bg-[#FF5A00] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#E04D00] cursor-pointer"
+                type="submit"
+                className="bg-[#FF5A00] text-white text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer hover:bg-orange-600 shrink-0"
               >
-                Guardar
+                Guardar y Conectar
               </button>
             </div>
-            <p className="text-[10px] text-slate-500 mt-1">
-              Este número identifica tu terminal Clip Wi-Fi en tu cuenta de Clip para mandar el cobro directo.
-            </p>
-          </div>
+          </form>
         )}
 
-        {/* Contenido Principal según el Estado */}
-        <div className="p-6 flex-1 flex flex-col items-center justify-center min-h-[220px] text-center">
+        {/* Contenido Dinámico por Estado */}
+        <div className="p-6 flex flex-col items-center justify-center min-h-[260px] text-center">
 
-          {/* ESTADO 1: INICIANDO / ENVIANDO A LA TERMINAL */}
+          {/* ESTADO 1: INICIANDO COBRO */}
           {step === 'INITIATING' && (
-            <div className="flex flex-col items-center space-y-3">
+            <div className="flex flex-col items-center space-y-4">
               <div className="relative">
-                <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center animate-pulse">
-                  <Wifi className="w-8 h-8 text-[#FF5A00]" />
+                <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center text-[#FF5A00]">
+                  <Wifi className="w-8 h-8 animate-pulse" />
                 </div>
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#FF5A00] flex items-center justify-center text-white">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                </div>
+                <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#FF5A00] border-2 border-white animate-ping" />
               </div>
               <div>
-                <h4 className="font-black text-slate-800 text-base">Enviando monto a la terminal Clip...</h4>
+                <h4 className="font-extrabold text-slate-900 text-base">Enviando orden a la terminal...</h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-xs">{statusMessage}</p>
               </div>
             </div>
           )}
 
-          {/* ESTADO 2: ESPERANDO QUE EL CLIENTE COBRE EN LA TERMINAL CLIP */}
+          {/* ESTADO 2: ESPERANDO TARJETA EN LA TERMINAL CLIP */}
           {step === 'AWAITING_CARD' && (
-            <div className="flex flex-col items-center space-y-4 w-full">
-              {/* Gráfico interactivo de terminal Clip */}
-              <div className="w-20 h-28 bg-gradient-to-b from-slate-900 to-slate-800 rounded-2xl p-2 shadow-lg border-2 border-slate-700 flex flex-col justify-between items-center relative overflow-hidden">
-                <div className="w-full bg-[#FF5A00] rounded text-[8px] text-white font-black py-0.5 uppercase tracking-wider text-center">
-                  CLIP
+            <div className="flex flex-col items-center space-y-4 animate-in fade-in">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-3xl bg-orange-50 border-2 border-orange-300 flex items-center justify-center text-[#FF5A00] shadow-md">
+                  <Smartphone className="w-10 h-10 animate-bounce" />
                 </div>
-                <div className="bg-slate-950 w-full rounded p-1 text-center font-mono text-[10px] text-emerald-400 font-bold">
-                  ${amount.toFixed(2)}
-                </div>
-                {/* Animación de tarjeta acercándose */}
-                <div className="w-12 h-6 bg-gradient-to-r from-amber-400 to-amber-500 rounded-sm shadow-md animate-bounce flex items-center justify-center text-[7px] font-black text-slate-900">
-                  TARJETA
+                <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
+                  <Wifi className="w-3.5 h-3.5" />
                 </div>
               </div>
 
@@ -350,7 +370,6 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                 </div>
               </div>
 
-              {/* Botón de aprobación rápida para pruebas/demo si se detecta modo simulación */}
               {isMockSimulation && (
                 <div className="pt-2">
                   <button
@@ -389,7 +408,146 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
             </div>
           )}
 
-          {/* ESTADO 4: ERROR - TERMINAL APAGADA O SIN SEÑAL WI-FI */}
+          {/* ESTADO 4A: ERROR - FALTA TRIGGER DEPLOY EN NETLIFY */}
+          {step === 'NETLIFY_REDEPLOY_ERROR' && (
+            <div className="flex flex-col items-center space-y-3 w-full text-left">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 self-center">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+
+              <div className="text-center w-full">
+                <h4 className="font-black text-slate-900 text-base">Falta Desplegar en Netlify</h4>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Las variables fueron guardadas, pero los servidores de Netlify necesitan recargarlas.
+                </p>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1.5 w-full">
+                <strong className="text-amber-900 font-bold block">Pasos en tu panel de Netlify:</strong>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px]">
+                  <li>Ve a la pestaña <strong>Deploys</strong> en tu panel de Netlify.</li>
+                  <li>Haz clic en el botón <strong>Trigger deploy</strong> (arriba a la derecha).</li>
+                  <li>Selecciona <strong>Clear cache and deploy site</strong>.</li>
+                  <li>Espera 1 minuto a que termine el despliegue y presiona <strong>Reintentar</strong> aquí abajo.</li>
+                </ol>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={startClipTransaction}
+                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Reintentar
+                </button>
+                <button
+                  type="button"
+                  onClick={runDiagnostic}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  Diagnóstico
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ESTADO 4B: ERROR 401 DE AUTENTICACIÓN CLIP */}
+          {step === 'AUTH_ERROR' && (
+            <div className="flex flex-col items-center space-y-3 w-full text-left">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-red-600 self-center">
+                <KeyRound className="w-6 h-6" />
+              </div>
+
+              <div className="text-center w-full">
+                <h4 className="font-black text-red-700 text-base">Error 401: Llave API no Aceptada</h4>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Clip rechazó la autenticación con tu <strong>CLIP_API_KEY</strong>.
+                </p>
+              </div>
+
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1.5 w-full">
+                <strong className="text-red-900 font-bold block">¿Cómo corregir la llave en Netlify?</strong>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>
+                    Ingresa a <strong>developer.clip.mx</strong> y ve a <strong>Credenciales API</strong>.
+                  </li>
+                  <li>
+                    Asegúrate de copiar el <strong>Token Basic</strong> completo (o combina <code className="bg-white px-1 py-0.5 rounded border border-red-200">api_key:secret_key</code>).
+                  </li>
+                  <li>
+                    Si tu terminal es física real, asegúrate de que la llave sea de <strong>Producción (Live)</strong> y no de Pruebas (Sandbox).
+                  </li>
+                  <li>
+                    Después de editarla en Netlify, recuerda hacer <strong>Trigger deploy</strong>.
+                  </li>
+                </ul>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={startClipTransaction}
+                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Reintentar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep('MANUAL_AUTH')}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Autorizar Manual
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ESTADO 4C: SERIE NO ENCONTRADA EN CLIP (404/400) */}
+          {step === 'SERIAL_NOT_FOUND' && (
+            <div className="flex flex-col items-center space-y-3 w-full text-left">
+              <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 self-center">
+                <Smartphone className="w-6 h-6" />
+              </div>
+
+              <div className="text-center w-full">
+                <h4 className="font-black text-slate-900 text-base">Terminal no Registrada en la Cuenta</h4>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  La serie <strong className="font-mono">{config.serialNumber}</strong> no pertenece a la cuenta de Clip vinculada.
+                </p>
+              </div>
+
+              <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1 w-full">
+                <p className="text-[11px]">
+                  Verifica en la app de Clip en tu teléfono o en el menú de la terminal (Ajustes → Dispositivo) que el número de serie sea exacto y que la terminal esté dada de alta en la misma cuenta del API Key.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingSerial(true)}
+                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  Corregir Serie
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep('MANUAL_AUTH')}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Autorizar Manual
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ESTADO 4D: TERMINAL APAGADA O SIN SEÑAL WI-FI */}
           {step === 'OFFLINE_ERROR' && (
             <div className="flex flex-col items-center space-y-3 w-full">
               <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center text-red-600">
@@ -403,7 +561,6 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                 </p>
               </div>
 
-              {/* Sugerencias prácticas para la cajera */}
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left text-xs text-amber-900 w-full space-y-1">
                 <div className="flex items-center gap-1 font-bold text-amber-800">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -411,12 +568,11 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                 </div>
                 <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-slate-700">
                   <li>Verifica que la terminal Clip esté <strong>encendida</strong> con pantalla activa.</li>
-                  <li>Revisa que el ícono de <strong>Wi-Fi</strong> en la terminal esté conectado.</li>
-                  <li>Confirma que el número de serie configurado coincida con tu dispositivo.</li>
+                  <li>Revisa que el ícono de <strong>Wi-Fi</strong> en la terminal esté conectado a tu red.</li>
+                  <li>Confirma que en Netlify hayas hecho <strong>Trigger deploy</strong> tras agregar las variables.</li>
                 </ul>
               </div>
 
-              {/* Opciones de Acción */}
               <div className="grid grid-cols-2 gap-2 w-full pt-2">
                 <button
                   type="button"
@@ -436,6 +592,15 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                   Autorizar Manual
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={runDiagnostic}
+                className="text-[11px] text-slate-500 hover:text-slate-800 underline font-semibold mt-1 cursor-pointer flex items-center gap-1"
+              >
+                <Activity className="w-3 h-3" />
+                Ver diagnóstico detallado del sistema
+              </button>
             </div>
           )}
 
@@ -470,7 +635,84 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
             </div>
           )}
 
-          {/* ESTADO 6: AUTORIZACIÓN MANUAL DE RESPALDO */}
+          {/* ESTADO 6: DIAGNÓSTICO EN VIVO */}
+          {step === 'DIAGNOSTIC' && (
+            <div className="flex flex-col items-center space-y-3 w-full text-left">
+              <div className="flex items-center justify-between w-full border-b border-slate-200 pb-2">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-orange-600" />
+                  <h4 className="font-black text-slate-900 text-sm">Diagnóstico de Conexión Clip</h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStep('OFFLINE_ERROR')}
+                  className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              {diagnosticLoading ? (
+                <div className="py-8 flex flex-col items-center justify-center gap-2">
+                  <RefreshCw className="w-6 h-6 text-orange-500 animate-spin" />
+                  <span className="text-xs text-slate-500 font-bold">Consultando Netlify y Clip...</span>
+                </div>
+              ) : diagnosticResult ? (
+                <div className="space-y-2 w-full text-xs">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 font-medium">CLIP_API_KEY en Netlify:</span>
+                      <strong className={diagnosticResult.diagnosis?.has_api_key ? 'text-emerald-700' : 'text-red-600'}>
+                        {diagnosticResult.diagnosis?.has_api_key ? '✅ Detectada' : '❌ No detectada (Haz Trigger Deploy)'}
+                      </strong>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 font-medium">Formato Token:</span>
+                      <span className="font-mono text-[11px] text-slate-800 font-bold">
+                        {diagnosticResult.diagnosis?.auth_header_format || 'N/A'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 font-medium">CLIP_TERMINAL_SERIAL:</span>
+                      <span className="font-mono text-[11px] text-slate-800">
+                        {diagnosticResult.diagnosis?.env_serial_value || config.serialNumber}
+                      </span>
+                    </div>
+
+                    {diagnosticResult.clip_http_status && (
+                      <div className="flex justify-between pt-1 border-t border-slate-200">
+                        <span className="text-slate-600 font-medium">Respuesta API Clip:</span>
+                        <span className={`font-mono font-bold ${diagnosticResult.clip_http_status === 200 ? 'text-emerald-600' : 'text-orange-600'}`}>
+                          HTTP {diagnosticResult.clip_http_status}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {diagnosticResult.message && (
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900">
+                      {diagnosticResult.message}
+                    </div>
+                  )}
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={runDiagnostic}
+                      className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Volver a diagnosticar
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {/* ESTADO 7: AUTORIZACIÓN MANUAL DE RESPALDO */}
           {step === 'MANUAL_AUTH' && (
             <form onSubmit={handleManualAuthSubmit} className="w-full text-left space-y-3">
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs">

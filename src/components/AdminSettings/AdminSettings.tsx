@@ -37,7 +37,7 @@ import {
 import { playBeep, playCashSound } from '../../utils/audio';
 import { printViaBluetooth, printViaUsbTypeB, printViaUsbSerial, printViaRawBtIntent } from '../../utils/thermalPrinter';
 import { getTodayString, getNowTimeString, loadDriverCustomers, saveDriverCustomers } from '../../utils/storage';
-import { getStoredClipConfig, saveClipConfig } from '../../services/clipService';
+import { getStoredClipConfig, saveClipConfig, diagnoseClipConnection } from '../../services/clipService';
 
 interface AdminSettingsProps {
   settings: Settings;
@@ -103,6 +103,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
   // Clip Terminal Wi-Fi state
   const [clipConfig, setClipConfig] = useState(getStoredClipConfig);
+  const [isTestingClip, setIsTestingClip] = useState<boolean>(false);
+  const [clipDiagnosticFeedback, setClipDiagnosticFeedback] = useState<any>(null);
 
   const createDummyTicket = (): SaleTicket => ({
     id: `test-${Date.now()}`,
@@ -1441,20 +1443,89 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 <strong className="text-orange-900 block font-bold">Netlify Function Activa:</strong>
                 <span className="text-[11px] font-mono text-slate-600">/.netlify/functions/clip-payment</span>
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  Para cobros reales, define la variable <strong>CLIP_API_KEY</strong> en tu panel de Netlify (Site Settings → Environment Variables).
+                  Para cobros reales, define la variable <strong>CLIP_API_KEY</strong> y <strong>CLIP_TERMINAL_SERIAL</strong> en tu panel de Netlify.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  playBeep(800, 'sine', 0.04);
-                  alert(`Configuración de Clip guardada exitosamente.\nSerie: ${clipConfig.serialNumber}`);
-                }}
-                className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black px-4 py-2 rounded-xl text-xs shadow-xs cursor-pointer shrink-0"
-              >
-                Guardar Terminal
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={isTestingClip}
+                  onClick={async () => {
+                    setIsTestingClip(true);
+                    setClipDiagnosticFeedback(null);
+                    playBeep(900, 'sine', 0.05);
+                    const res = await diagnoseClipConnection(clipConfig.serialNumber);
+                    setClipDiagnosticFeedback(res);
+                    setIsTestingClip(false);
+                  }}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-3 py-2 rounded-xl text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <Wifi className="w-3.5 h-3.5" />
+                  {isTestingClip ? 'Probando...' : 'Probar Conexión'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playBeep(800, 'sine', 0.04);
+                    saveClipConfig(clipConfig);
+                    alert(`Configuración de Clip guardada exitosamente.\nSerie: ${clipConfig.serialNumber}`);
+                  }}
+                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black px-4 py-2 rounded-xl text-xs shadow-xs cursor-pointer shrink-0"
+                >
+                  Guardar Terminal
+                </button>
+              </div>
             </div>
+
+            {/* Resultado del diagnóstico de Clip */}
+            {clipDiagnosticFeedback && (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
+                <div className="flex items-center justify-between font-bold">
+                  <span className="text-slate-800">Resultado de la Prueba de Conexión:</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-mono ${
+                    clipDiagnosticFeedback.status === 'CONNECTED' ? 'bg-emerald-100 text-emerald-800' :
+                    clipDiagnosticFeedback.status === 'AUTH_FAILED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {clipDiagnosticFeedback.status}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white p-2.5 rounded-xl border border-slate-200">
+                  <div>
+                    <span>CLIP_API_KEY en Netlify: </span>
+                    <strong className={clipDiagnosticFeedback.diagnosis?.has_api_key ? 'text-emerald-600' : 'text-red-600'}>
+                      {clipDiagnosticFeedback.diagnosis?.has_api_key ? 'Detectada' : 'No detectada'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>CLIP_TERMINAL_SERIAL: </span>
+                    <strong className="font-mono text-slate-800">
+                      {clipDiagnosticFeedback.diagnosis?.env_serial_value || clipConfig.serialNumber}
+                    </strong>
+                  </div>
+                  {clipDiagnosticFeedback.clip_http_status && (
+                    <div>
+                      <span>Respuesta Clip API: </span>
+                      <strong className="font-mono text-orange-600">
+                        HTTP {clipDiagnosticFeedback.clip_http_status}
+                      </strong>
+                    </div>
+                  )}
+                </div>
+
+                {clipDiagnosticFeedback.message && (
+                  <p className="text-[11px] text-slate-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                    {clipDiagnosticFeedback.message}
+                  </p>
+                )}
+
+                {clipDiagnosticFeedback.advice && (
+                  <p className="text-[11px] text-blue-900 bg-blue-50 p-2 rounded-lg border border-blue-200 font-medium">
+                    💡 {clipDiagnosticFeedback.advice}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Reset button */}
