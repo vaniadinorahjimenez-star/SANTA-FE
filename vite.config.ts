@@ -28,13 +28,20 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
                 try { payload = JSON.parse(bodyStr); } catch (e) {}
               }
 
-              const rawApiKey = payload.api_key || process.env.CLIP_API_KEY;
+              const rawApiKey = payload.api_key || process.env.CLIP_API_KEY || process.env.CLIP_KEY;
+              const rawSecretKey = payload.secret_key || process.env.CLIP_SECRET_KEY || process.env.CLIP_SECRET;
               const serial = (payload.serial_number_pos || process.env.CLIP_TERMINAL_SERIAL || 'P8C2240805000156').trim();
               const action = payload.action || 'create_payment';
 
+              // Construir encabezado Authorization según especificaciones de Clip
               let authHeader = '';
-              if (rawApiKey) {
-                let key = String(rawApiKey).trim();
+              const apiKey = (rawApiKey || '').trim();
+              const secretKey = (rawSecretKey || '').trim();
+
+              if (apiKey && secretKey) {
+                authHeader = `Basic ${Buffer.from(`${apiKey}:${secretKey}`).toString('base64')}`;
+              } else if (apiKey) {
+                let key = apiKey;
                 if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
                   key = key.slice(1, -1).trim();
                 }
@@ -52,30 +59,47 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
                 'Access-Control-Allow-Origin': '*'
               };
 
-              // DIAGNOSTIC
+              // ACCIÓN: DIAGNÓSTICO EN VIVO
               if (action === 'diagnose') {
-                if (!rawApiKey) {
+                if (!authHeader) {
                   res.writeHead(200, headers);
                   return res.end(JSON.stringify({
-                    status: 'MISSING_API_KEY',
-                    message: 'Falta tu CLIP_API_KEY. Ingrésala en Ajustes de la panadería o configúrala en Netlify.',
-                    diagnosis: { has_api_key: false, env_serial_value: serial }
+                    status: 'MISSING_CREDENTIALS',
+                    message: 'Faltan credenciales de Clip. Ingresa tu API Key y Secret Key en Ajustes de la Panadería.',
+                    diagnosis: { has_api_key: false, has_secret_key: false, env_serial_value: serial }
                   }));
                 }
 
                 try {
-                  const clipRes = await fetch('https://api.payclip.io/f2f/pinpad/v1/payment', {
-                    method: 'POST',
-                    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ amount: 0.01, reference: 'PING-TEST', serial_number_pos: serial })
+                  // Consultar lectores registrados en la cuenta
+                  const clipRes = await fetch('https://api.payclip.io/f2f/pinpad/v1/devices/status', {
+                    method: 'GET',
+                    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
                   });
                   const clipData = await clipRes.json().catch(() => ({}));
+
+                  let isSerialFound = false;
+                  if (Array.isArray(clipData)) {
+                    isSerialFound = clipData.some(d => 
+                      (d.serial_number || d.serial_number_pos || d.serialNumber || d.ssn || '').toUpperCase() === serial.toUpperCase()
+                    );
+                  }
+
                   res.writeHead(200, headers);
                   return res.end(JSON.stringify({
                     status: clipRes.status === 401 ? 'AUTH_FAILED' : 'CONNECTED',
                     clip_http_status: clipRes.status,
                     clip_response: clipData,
-                    diagnosis: { has_api_key: true, env_serial_value: serial, auth_header_format: 'Basic [OK]' }
+                    is_serial_in_account: isSerialFound,
+                    message: clipRes.status === 401 
+                      ? 'Error 401: Clave no reconocida por Clip. Revisa tu API Key y Secret Key.'
+                      : (isSerialFound ? `Terminal ${serial} conectada y registrada en tu cuenta.` : `Credenciales válidas (HTTP 200). La serie ${serial} no aparece en la lista de terminales activas de la cuenta.`),
+                    diagnosis: {
+                      has_api_key: Boolean(apiKey),
+                      has_secret_key: Boolean(secretKey),
+                      env_serial_value: serial,
+                      auth_header_format: authHeader.startsWith('Basic ') ? 'Basic [Configurado]' : 'Bearer [Configurado]'
+                    }
                   }));
                 } catch (e: any) {
                   res.writeHead(200, headers);
@@ -83,7 +107,7 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
                 }
               }
 
-              // CHECK STATUS (POLLING REAL)
+              // ACCIÓN: CHECK STATUS (POLLING REAL)
               if (action === 'check_status') {
                 const reqId = payload.pinpad_request_id;
                 if (!authHeader) {
@@ -99,27 +123,49 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
                 return res.end(JSON.stringify(clipData));
               }
 
-              // CREATE REAL PAYMENT
+              // ACCIÓN: CREAR COBRO REAL EN LA TERMINAL
               if (!authHeader) {
                 res.writeHead(400, headers);
                 return res.end(JSON.stringify({
-                  error: 'NETLIFY_REDEPLOY_NEEDED',
-                  message: 'Falta tu CLIP_API_KEY. Ingrésala en Ajustes de la Panadería o en tu panel de Netlify (y haz Trigger deploy).'
+                  error: 'CLIP_AUTH_ERROR',
+                  message: 'Faltan las credenciales de Clip. Ingrésalas en Ajustes de la Panadería o en tu panel de Netlify.'
                 }));
               }
+
+              const numAmount = Number(payload.amount);
+              // CRUCIAL: "amount" debe ser un string con 2 decimales según la API de Clip
+              const formattedAmount = isNaN(numAmount) ? '0.00' : numAmount.toFixed(2);
 
               const clipRes = await fetch('https://api.payclip.io/f2f/pinpad/v1/payment', {
                 method: 'POST',
                 headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  amount: Number(Number(payload.amount).toFixed(2)),
-                  reference: payload.reference || `PAN-${Date.now()}`,
+                  amount: formattedAmount,
+                  reference: (payload.reference || `PAN-${Date.now()}`).substring(0, 40),
                   serial_number_pos: serial,
                   preferences: { is_auto_print_receipt_enabled: true, is_tip_enabled: false, is_retry_enabled: true }
                 })
               });
 
               const clipData = await clipRes.json().catch(() => ({}));
+
+              if (!clipRes.ok) {
+                const rawMsg = clipData.message || clipData.description || '';
+                let errCode = 'UNKNOWN';
+                if (clipRes.status === 401) errCode = 'CLIP_AUTH_ERROR';
+                else if (clipRes.status === 404) errCode = 'DEVICE_NOT_FOUND';
+                else if (clipRes.status === 503 || clipRes.status === 504 || clipRes.status === 408) errCode = 'TERMINAL_OFFLINE';
+                else if (clipRes.status === 409) errCode = 'TERMINAL_BUSY';
+
+                res.writeHead(clipRes.status, headers);
+                return res.end(JSON.stringify({
+                  error: errCode,
+                  http_status: clipRes.status,
+                  message: rawMsg || `Clip API devolvió error HTTP ${clipRes.status}`,
+                  details: clipData
+                }));
+              }
+
               res.writeHead(clipRes.status, headers);
               return res.end(JSON.stringify(clipData));
 

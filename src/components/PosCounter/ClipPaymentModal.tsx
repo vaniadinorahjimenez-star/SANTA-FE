@@ -63,10 +63,14 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>('Enviando orden a la terminal Clip por Wi-Fi...');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [errorDetails, setErrorDetails] = useState<any>(null);
+  const [httpStatus, setHttpStatus] = useState<number | null>(null);
   const [authCode, setAuthCode] = useState<string>('');
   const [last4, setLast4] = useState<string>('');
   const [isEditingSerial, setIsEditingSerial] = useState<boolean>(false);
+  const [isEditingCredentials, setIsEditingCredentials] = useState<boolean>(false);
   const [serialInput, setSerialInput] = useState<string>('');
+  const [apiKeyInput, setApiKeyInput] = useState<string>('');
+  const [secretKeyInput, setSecretKeyInput] = useState<string>('');
   const [config, setConfig] = useState(getStoredClipConfig());
 
   // Fallback manual de respaldo
@@ -86,6 +90,8 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     const stored = getStoredClipConfig();
     setConfig(stored);
     setSerialInput(stored.serialNumber || DEFAULT_CLIP_SERIAL);
+    setApiKeyInput(stored.apiKey || '');
+    setSecretKeyInput(stored.secretKey || '');
     startClipTransaction();
 
     return () => {
@@ -106,11 +112,13 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     setStatusMessage('Contactando a la terminal Clip P8C2240805000156 vía Wi-Fi...');
     setErrorMessage('');
     setErrorDetails(null);
+    setHttpStatus(null);
 
     const sendRes = await sendPaymentToClipTerminal(amount, folio);
 
     if (!sendRes.success) {
       setErrorDetails(sendRes.details);
+      setHttpStatus(sendRes.httpStatus || null);
       
       if (sendRes.errorType === 'NETLIFY_REDEPLOY_NEEDED') {
         setStep('NETLIFY_REDEPLOY_ERROR');
@@ -120,7 +128,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
       } else if (sendRes.errorType === 'CLIP_AUTH_ERROR' || sendRes.httpStatus === 401) {
         setStep('AUTH_ERROR');
         setErrorMessage(
-          sendRes.message || 'Clip no reconoció la clave de autorización (Error 401). Verifica tu CLIP_API_KEY.'
+          sendRes.message || 'Clip no reconoció la clave de autorización (Error 401). Verifica tu API Key y Secret Key de developer.clip.mx.'
         );
       } else if (sendRes.errorType === 'DEVICE_NOT_FOUND' || sendRes.httpStatus === 404) {
         setStep('SERIAL_NOT_FOUND');
@@ -192,6 +200,19 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     setConfig(updated);
     saveClipConfig(updated);
     setIsEditingSerial(false);
+    startClipTransaction();
+  };
+
+  const handleSaveCredentials = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updated = {
+      ...config,
+      apiKey: apiKeyInput.trim(),
+      secretKey: secretKeyInput.trim()
+    };
+    setConfig(updated);
+    saveClipConfig(updated);
+    setIsEditingCredentials(false);
     startClipTransaction();
   };
 
@@ -428,35 +449,64 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               </div>
 
               <div className="text-center w-full">
-                <h4 className="font-black text-red-700 text-base">Error 401: Llave API no Aceptada</h4>
+                <h4 className="font-black text-red-700 text-base">Error 401: Credenciales Rechazadas por Clip</h4>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Clip rechazó la autenticación con tu <strong>CLIP_API_KEY</strong>.
+                  Clip requiere tu <strong>API Key</strong> y tu <strong>Secret Key</strong> de producción.
                 </p>
               </div>
 
-              <div className="bg-red-50 border border-red-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1.5 w-full">
-                <strong className="text-red-900 font-bold block">¿Cómo verificar tu llave?</strong>
-                <ul className="list-disc pl-4 space-y-1 text-[11px]">
-                  <li>
-                    Entra a <strong>developer.clip.mx</strong> y ve a <strong>Credenciales API</strong>.
-                  </li>
-                  <li>
-                    Asegúrate de copiar el <strong>Token de Producción (Live)</strong> ya que tu terminal {config.serialNumber} es física real.
-                  </li>
-                  <li>
-                    Puedes ingresarla directamente en <strong>Ajustes de la Panadería</strong> para probar al instante.
-                  </li>
-                </ul>
-              </div>
+              {/* Formulario rápido para corregir API Key y Secret Key */}
+              <form onSubmit={handleSaveCredentials} className="w-full bg-red-50/80 border border-red-200 rounded-2xl p-3.5 space-y-2.5 text-xs">
+                <div className="font-bold text-red-950 flex items-center justify-between">
+                  <span>Actualizar Credenciales de Clip:</span>
+                  <span className="text-[10px] text-red-700 font-normal">developer.clip.mx</span>
+                </div>
 
-              <div className="grid grid-cols-2 gap-2 w-full pt-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                    API Key (Llave pública):
+                  </label>
+                  <input
+                    type="text"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder="Ej. d8e5e789-xxxx..."
+                    className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 font-mono text-xs focus:ring-2 focus:ring-[#FF5A00]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                    Secret Key (Clave secreta):
+                  </label>
+                  <input
+                    type="password"
+                    value={secretKeyInput}
+                    onChange={(e) => setSecretKeyInput(e.target.value)}
+                    placeholder="Clave secreta generada en Clip"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 font-mono text-xs focus:ring-2 focus:ring-[#FF5A00]"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="submit"
+                    className="flex-1 bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Guardar y Reintentar Cobro
+                  </button>
+                </div>
+              </form>
+
+              <div className="grid grid-cols-2 gap-2 w-full pt-1">
                 <button
                   type="button"
-                  onClick={startClipTransaction}
-                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                  onClick={runDiagnostic}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Reintentar
+                  <Activity className="w-3.5 h-3.5 text-orange-600" />
+                  Diagnóstico en Vivo
                 </button>
                 <button
                   type="button"

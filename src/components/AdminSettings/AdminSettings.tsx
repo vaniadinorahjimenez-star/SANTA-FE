@@ -32,8 +32,10 @@ import {
   X,
   BookOpen,
   Wifi,
-  WifiOff
+  WifiOff,
+  Terminal
 } from 'lucide-react';
+import { ClipDiagnosticTool } from './ClipDiagnosticTool';
 import { playBeep, playCashSound } from '../../utils/audio';
 import { printViaBluetooth, printViaUsbTypeB, printViaUsbSerial, printViaRawBtIntent } from '../../utils/thermalPrinter';
 import { getTodayString, getNowTimeString, loadDriverCustomers, saveDriverCustomers } from '../../utils/storage';
@@ -65,7 +67,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState<string>('');
   const [pinError, setPinError] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'catalog_prices' | 'prices' | 'products' | 'users' | 'driver_clients' | 'loyalty' | 'store'>('catalog_prices');
+  const [activeTab, setActiveTab] = useState<'catalog_prices' | 'prices' | 'products' | 'users' | 'driver_clients' | 'loyalty' | 'store' | 'clip_diagnostic'>('catalog_prices');
   
   // Local form states
   const [localSettings, setLocalSettings] = useState<Settings>(settings);
@@ -483,6 +485,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </button>
 
         <button
+          id="tab-admin-store"
           onClick={() => setActiveTab('store')}
           className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold flex items-center gap-2 transition-all shrink-0 ${
             activeTab === 'store'
@@ -492,6 +495,19 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         >
           <SettingsIcon className="w-4 h-4" />
           <span>Datos de la Panadería & Tickets</span>
+        </button>
+
+        <button
+          id="tab-admin-clip-diagnostic"
+          onClick={() => setActiveTab('clip_diagnostic')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold flex items-center gap-2 transition-all shrink-0 ${
+            activeTab === 'clip_diagnostic'
+              ? 'bg-[#FF5A00] text-white shadow-md scale-102 ring-2 ring-orange-300'
+              : 'bg-white text-slate-700 border border-orange-200 hover:bg-orange-50'
+          }`}
+        >
+          <Terminal className="w-4 h-4 text-orange-500" />
+          <span>🔍 Diagnóstico Clip API (P8C2240805000156)</span>
         </button>
       </div>
 
@@ -1399,10 +1415,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Número de Serie de la Terminal Clip:
+                  Número de Serie de la Terminal:
                 </label>
                 <input
                   type="text"
@@ -1416,7 +1432,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs font-bold focus:ring-2 focus:ring-orange-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Serie oficial de tu terminal: <strong>P8C2240805000156</strong>.
+                  Serie oficial: <strong>P8C2240805000156</strong>
                 </span>
               </div>
 
@@ -1442,31 +1458,50 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  CLIP_API_KEY (Token de developer.clip.mx):
+                  API Key (developer.clip.mx):
                 </label>
                 <input
-                  type="password"
+                  type="text"
                   value={clipConfig.apiKey || ''}
                   onChange={(e) => {
                     const updated = { ...clipConfig, apiKey: e.target.value };
                     setClipConfig(updated);
                     saveClipConfig(updated);
                   }}
-                  placeholder="Pegar token de Clip (Opcional si está en Netlify)"
+                  placeholder="Ej: d8e5e789-xxxx-xxxx"
                   className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-orange-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Si lo pegas aquí, funciona de inmediato sin requerir deploy en Netlify.
+                  Llave pública o Token completo.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Secret Key (developer.clip.mx):
+                </label>
+                <input
+                  type="password"
+                  value={clipConfig.secretKey || ''}
+                  onChange={(e) => {
+                    const updated = { ...clipConfig, secretKey: e.target.value };
+                    setClipConfig(updated);
+                    saveClipConfig(updated);
+                  }}
+                  placeholder="Clave secreta de Clip"
+                  className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-orange-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Requerida junto con la API Key para autenticar.
                 </span>
               </div>
             </div>
 
-            <div className="p-3 bg-orange-50/70 border border-orange-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="p-3.5 bg-orange-50/80 border border-orange-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-xs text-slate-700">
-                <strong className="text-orange-900 block font-bold">Netlify Function Activa:</strong>
-                <span className="text-[11px] font-mono text-slate-600">/.netlify/functions/clip-payment</span>
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  Para cobros reales, define la variable <strong>CLIP_API_KEY</strong> y <strong>CLIP_TERMINAL_SERIAL</strong> en tu panel de Netlify.
+                <strong className="text-orange-900 block font-bold">¿Cómo autentica Clip?</strong>
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  Clip genera un par <strong>API Key</strong> y <strong>Secret Key</strong> en <em>developer.clip.mx &gt; Credenciales API</em>. Ambos datos son necesarios para que la terminal reciba órdenes por Wi-Fi.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1481,10 +1516,19 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     setClipDiagnosticFeedback(res);
                     setIsTestingClip(false);
                   }}
-                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-3 py-2 rounded-xl text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-3.5 py-2 rounded-xl text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
                   <Wifi className="w-3.5 h-3.5" />
-                  {isTestingClip ? 'Probando...' : 'Probar Conexión'}
+                  {isTestingClip ? 'Probando...' : 'Prueba Rápida'}
+                </button>
+                <button
+                  id="open-full-clip-diagnostic-btn"
+                  type="button"
+                  onClick={() => setActiveTab('clip_diagnostic')}
+                  className="bg-orange-100 hover:bg-orange-200 text-orange-950 font-bold px-3.5 py-2 rounded-xl text-xs shadow-xs cursor-pointer flex items-center gap-1.5 border border-orange-200"
+                >
+                  <Terminal className="w-3.5 h-3.5 text-orange-600" />
+                  <span>Herramienta de Diagnóstico API</span>
                 </button>
                 <button
                   type="button"
@@ -1502,10 +1546,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
             {/* Resultado del diagnóstico de Clip */}
             {clipDiagnosticFeedback && (
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-xs animate-in fade-in">
                 <div className="flex items-center justify-between font-bold">
-                  <span className="text-slate-800">Resultado de la Prueba de Conexión:</span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-mono ${
+                  <span className="text-slate-800">Resultado de la Prueba de Conexión Clip:</span>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] uppercase font-mono font-black ${
                     clipDiagnosticFeedback.status === 'CONNECTED' ? 'bg-emerald-100 text-emerald-800' :
                     clipDiagnosticFeedback.status === 'AUTH_FAILED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
                   }`}>
@@ -1513,39 +1557,59 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white p-2.5 rounded-xl border border-slate-200">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-600 bg-white p-3 rounded-xl border border-slate-200">
                   <div>
-                    <span>CLIP_API_KEY en Netlify: </span>
-                    <strong className={clipDiagnosticFeedback.diagnosis?.has_api_key ? 'text-emerald-600' : 'text-red-600'}>
-                      {clipDiagnosticFeedback.diagnosis?.has_api_key ? 'Detectada' : 'No detectada'}
+                    <span className="text-slate-500">API Key: </span>
+                    <strong className={clipDiagnosticFeedback.diagnosis?.has_api_key ? 'text-emerald-600 font-bold' : 'text-red-600 font-bold'}>
+                      {clipDiagnosticFeedback.diagnosis?.has_api_key ? 'Detectada' : 'No ingresada'}
                     </strong>
                   </div>
                   <div>
-                    <span>CLIP_TERMINAL_SERIAL: </span>
-                    <strong className="font-mono text-slate-800">
+                    <span className="text-slate-500">Secret Key: </span>
+                    <strong className={clipDiagnosticFeedback.diagnosis?.has_secret_key ? 'text-emerald-600 font-bold' : 'text-slate-400'}>
+                      {clipDiagnosticFeedback.diagnosis?.has_secret_key ? 'Detectada' : 'No ingresada'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Serie terminal: </span>
+                    <strong className="font-mono text-slate-800 font-bold">
                       {clipDiagnosticFeedback.diagnosis?.env_serial_value || clipConfig.serialNumber}
                     </strong>
                   </div>
-                  {clipDiagnosticFeedback.clip_http_status && (
-                    <div>
-                      <span>Respuesta Clip API: </span>
-                      <strong className="font-mono text-orange-600">
-                        HTTP {clipDiagnosticFeedback.clip_http_status}
-                      </strong>
-                    </div>
-                  )}
                 </div>
 
+                {clipDiagnosticFeedback.clip_http_status && (
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-slate-500">Código HTTP devuelto por Clip:</span>
+                    <span className={`font-mono font-bold px-2 py-0.5 rounded-md ${
+                      clipDiagnosticFeedback.clip_http_status === 200 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-orange-50 text-orange-700 border border-orange-200'
+                    }`}>
+                      HTTP {clipDiagnosticFeedback.clip_http_status}
+                    </span>
+                  </div>
+                )}
+
                 {clipDiagnosticFeedback.message && (
-                  <p className="text-[11px] text-slate-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                  <p className="text-[11px] text-slate-700 bg-amber-50 p-2.5 rounded-xl border border-amber-200 leading-relaxed font-medium">
                     {clipDiagnosticFeedback.message}
                   </p>
                 )}
 
                 {clipDiagnosticFeedback.advice && (
-                  <p className="text-[11px] text-blue-900 bg-blue-50 p-2 rounded-lg border border-blue-200 font-medium">
+                  <p className="text-[11px] text-blue-900 bg-blue-50 p-2.5 rounded-xl border border-blue-200 font-medium">
                     💡 {clipDiagnosticFeedback.advice}
                   </p>
+                )}
+
+                {clipDiagnosticFeedback.clip_response && (
+                  <details className="mt-2 text-[10px]">
+                    <summary className="cursor-pointer font-mono text-slate-500 hover:text-slate-800">
+                      Ver respuesta técnica de Clip API (JSON)
+                    </summary>
+                    <pre className="mt-1 p-2 bg-slate-900 text-emerald-400 rounded-lg overflow-x-auto max-h-36">
+                      {JSON.stringify(clipDiagnosticFeedback.clip_response, null, 2)}
+                    </pre>
+                  </details>
                 )}
               </div>
             )}
@@ -1570,6 +1634,14 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* TAB: HERRAMIENTA DE DIAGNÓSTICO CLIP API (P8C2240805000156) */}
+      {activeTab === 'clip_diagnostic' && (
+        <ClipDiagnosticTool
+          initialSerial="P8C2240805000156"
+          onConfigUpdated={() => setClipConfig(getStoredClipConfig())}
+        />
       )}
     </div>
   );

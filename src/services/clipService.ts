@@ -7,7 +7,8 @@ export interface ClipConfig {
   serialNumber: string;
   terminalName?: string;
   autoPrintReceipt?: boolean;
-  apiKey?: string; // Opcional: permite configurar la llave directamente en la app
+  apiKey?: string;       // API Key pública o token completo
+  secretKey?: string;    // Clave secreta (Secret Key) de developer.clip.mx
 }
 
 export type ClipErrorType = 
@@ -106,7 +107,8 @@ export async function sendPaymentToClipTerminal(
         amount,
         reference,
         serial_number_pos: serial,
-        api_key: config.apiKey || undefined
+        api_key: config.apiKey || undefined,
+        secret_key: config.secretKey || undefined
       })
     });
 
@@ -153,7 +155,7 @@ export async function pollClipPaymentStatus(
   pinpadRequestId: string,
   onStatusUpdate: (statusText: string) => void,
   signal?: AbortSignal,
-  maxAttempts: number = 36 // 36 intentos * 2.5s = ~90 segundos para que el cliente deslice/inserte tarjeta
+  maxAttempts: number = 36 // 36 intentos * 2.5s = ~90 segundos
 ): Promise<ClipPaymentResult> {
   const config = getStoredClipConfig();
   let attempts = 0;
@@ -177,7 +179,8 @@ export async function pollClipPaymentStatus(
         body: JSON.stringify({
           action: 'check_status',
           pinpad_request_id: pinpadRequestId,
-          api_key: config.apiKey || undefined
+          api_key: config.apiKey || undefined,
+          secret_key: config.secretKey || undefined
         }),
         signal
       });
@@ -241,6 +244,8 @@ export async function diagnoseClipConnection(serialNumber?: string): Promise<{
   diagnosis?: any;
   clip_http_status?: number;
   clip_response?: any;
+  is_serial_in_account?: boolean;
+  devices_found?: any[];
   advice?: string;
 }> {
   try {
@@ -253,7 +258,8 @@ export async function diagnoseClipConnection(serialNumber?: string): Promise<{
       body: JSON.stringify({
         action: 'diagnose',
         serial_number_pos: serial,
-        api_key: config.apiKey || undefined
+        api_key: config.apiKey || undefined,
+        secret_key: config.secretKey || undefined
       })
     });
 
@@ -265,6 +271,8 @@ export async function diagnoseClipConnection(serialNumber?: string): Promise<{
       diagnosis: data.diagnosis,
       clip_http_status: data.clip_http_status,
       clip_response: data.clip_response,
+      is_serial_in_account: data.is_serial_in_account,
+      devices_found: data.devices_found,
       advice: data.advice
     };
   } catch (err: any) {
