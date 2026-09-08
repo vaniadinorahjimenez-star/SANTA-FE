@@ -89,11 +89,13 @@ exports.handler = async (event) => {
       }
     }
 
-    // Obtenemos credenciales del payload del cliente o de variables de entorno de Netlify
-    const rawApiKey = payload.api_key || process.env.CLIP_API_KEY || process.env.CLIP_KEY;
-    const rawSecretKey = payload.secret_key || process.env.CLIP_SECRET_KEY || process.env.CLIP_SECRET;
-
+    const defaultApiKey = 'a7c54f1f-9bea-4405-a128-83e8f18f9d32';
+    const defaultSecretKey = '9d0167db-964e-459b-bada-b758d301f792';
     const defaultSerial = 'P8C2240805000156';
+
+    // Obtenemos credenciales del payload del cliente o de variables de entorno de Netlify o credenciales oficiales
+    const rawApiKey = payload.api_key || process.env.CLIP_API_KEY || process.env.CLIP_KEY || defaultApiKey;
+    const rawSecretKey = payload.secret_key || process.env.CLIP_SECRET_KEY || process.env.CLIP_SECRET || defaultSecretKey;
     const serialNumber = (payload.serial_number_pos || process.env.CLIP_TERMINAL_SERIAL || process.env.CLIP_SERIAL_NUMBER || defaultSerial).trim();
     
     const authHeaderValue = buildClipAuthHeader(rawApiKey, rawSecretKey);

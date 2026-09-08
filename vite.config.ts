@@ -28,9 +28,13 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
                 try { payload = JSON.parse(bodyStr); } catch (e) {}
               }
 
-              const rawApiKey = payload.api_key || process.env.CLIP_API_KEY || process.env.CLIP_KEY;
-              const rawSecretKey = payload.secret_key || process.env.CLIP_SECRET_KEY || process.env.CLIP_SECRET;
-              const serial = (payload.serial_number_pos || process.env.CLIP_TERMINAL_SERIAL || 'P8C2240805000156').trim();
+              const defaultApiKey = 'a7c54f1f-9bea-4405-a128-83e8f18f9d32';
+              const defaultSecretKey = '9d0167db-964e-459b-bada-b758d301f792';
+              const defaultSerial = 'P8C2240805000156';
+
+              const rawApiKey = payload.api_key || process.env.CLIP_API_KEY || process.env.CLIP_KEY || defaultApiKey;
+              const rawSecretKey = payload.secret_key || process.env.CLIP_SECRET_KEY || process.env.CLIP_SECRET || defaultSecretKey;
+              const serial = (payload.serial_number_pos || process.env.CLIP_TERMINAL_SERIAL || defaultSerial).trim();
               const action = payload.action || 'create_payment';
 
               // Construir encabezado Authorization según especificaciones de Clip

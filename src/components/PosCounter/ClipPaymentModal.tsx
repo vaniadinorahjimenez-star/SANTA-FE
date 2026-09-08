@@ -528,31 +528,37 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               </div>
 
               <div className="text-center w-full">
-                <h4 className="font-black text-slate-900 text-base">Terminal no Registrada en la Cuenta</h4>
+                <h4 className="font-black text-slate-900 text-base">Terminal no Registrada en Modo PinPad</h4>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  La serie <strong className="font-mono">{config.serialNumber}</strong> no pertenece a la cuenta Clip vinculada.
+                  Clip no detectó la terminal <strong className="font-mono">{config.serialNumber}</strong> habilitada para recibir cobros remotos vía API.
                 </p>
               </div>
 
-              <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1 w-full">
-                <p className="text-[11px]">
-                  Verifica en la app de Clip en tu teléfono que la terminal esté activada bajo la misma cuenta con la que generaste la API Key.
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 space-y-1.5 w-full text-left">
+                <p className="text-[11px] font-semibold text-amber-900">
+                  ⚠️ ¿Por qué ocurre esto?
+                </p>
+                <p className="text-[11px] text-slate-700">
+                  Las terminales Clip de fábrica requieren que Clip les instale la aplicación <strong>PinPad</strong> para poder enlazarse a la API. Se solicita a Clip vía <strong>developers@payclip.com</strong> con el número de serie <span className="font-mono font-bold">{config.serialNumber}</span>.
+                </p>
+                <p className="text-[11px] text-blue-800 font-semibold pt-1 border-t border-amber-200/60">
+                  💡 Para no detener la venta: Puedes cobrar tecleando el monto en la pantalla física de tu terminal y luego presionar "Autorizar Manual".
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-2 w-full pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsEditingSerial(true)}
-                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                  onClick={() => runDiagnostic()}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer"
                 >
-                  <Sliders className="w-3.5 h-3.5" />
-                  Corregir Serie
+                  <Activity className="w-3.5 h-3.5 text-orange-600" />
+                  Ver Diagnóstico
                 </button>
                 <button
                   type="button"
                   onClick={() => setStep('MANUAL_AUTH')}
-                  className="bg-slate-800 hover:bg-slate-900 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                  className="bg-[#FF5A00] hover:bg-[#E04D00] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-md cursor-pointer"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
                   Autorizar Manual

@@ -37,6 +37,9 @@ export interface ClipPaymentResult {
 
 const STORAGE_KEY = 'bakery_clip_terminal_config';
 export const DEFAULT_CLIP_SERIAL = 'P8C2240805000156';
+export const DEFAULT_CLIP_ALIAS = 'Clip Total 2';
+export const DEFAULT_CLIP_API_KEY = 'a7c54f1f-9bea-4405-a128-83e8f18f9d32';
+export const DEFAULT_CLIP_SECRET_KEY = '9d0167db-964e-459b-bada-b758d301f792';
 
 // Obtener configuración guardada de la terminal Clip en el navegador
 export function getStoredClipConfig(): ClipConfig {
@@ -44,14 +47,26 @@ export function getStoredClipConfig(): ClipConfig {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.serialNumber === 'string') {
-        // Auto-corregir número de serie previo con typo (4 ceros -> 3 ceros)
-        if (
-          parsed.serialNumber === 'P8C22408050000156' || 
-          parsed.serialNumber === '08221800012345' ||
-          parsed.serialNumber.trim() === ''
-        ) {
+      if (parsed && typeof parsed === 'object') {
+        // Asegurar que use la serie, alias y llaves oficiales
+        let hasChanges = false;
+        if (!parsed.serialNumber || parsed.serialNumber === 'P8C22408050000156' || parsed.serialNumber === '08221800012345') {
           parsed.serialNumber = DEFAULT_CLIP_SERIAL;
+          hasChanges = true;
+        }
+        if (!parsed.apiKey) {
+          parsed.apiKey = DEFAULT_CLIP_API_KEY;
+          hasChanges = true;
+        }
+        if (!parsed.secretKey) {
+          parsed.secretKey = DEFAULT_CLIP_SECRET_KEY;
+          hasChanges = true;
+        }
+        if (!parsed.terminalName) {
+          parsed.terminalName = DEFAULT_CLIP_ALIAS;
+          hasChanges = true;
+        }
+        if (hasChanges) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
         }
         return parsed;
@@ -60,11 +75,18 @@ export function getStoredClipConfig(): ClipConfig {
   } catch (e) {
     console.error('Error al leer configuración de Clip:', e);
   }
-  return {
+
+  const initialConfig: ClipConfig = {
     serialNumber: DEFAULT_CLIP_SERIAL,
-    terminalName: 'Clip Total Wi-Fi (Caja)',
+    terminalName: DEFAULT_CLIP_ALIAS,
+    apiKey: DEFAULT_CLIP_API_KEY,
+    secretKey: DEFAULT_CLIP_SECRET_KEY,
     autoPrintReceipt: true
   };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(initialConfig));
+  } catch {}
+  return initialConfig;
 }
 
 // Guardar configuración de la terminal Clip
@@ -79,7 +101,85 @@ export function saveClipConfig(config: Partial<ClipConfig>): void {
 }
 
 /**
+ * Implementación exacta del snippet oficial de Clip Developers integrado con las variables de la aplicación:
+ * 
+ * const options = {method: 'POST', headers: {'content-type': 'application/json'}};
+ * fetch('https://api.payclip.io/f2f/pinpad/v1/payment', options)
+ *   .then(res => res.json())
+ *   .then(res => console.log(res))
+ *   .catch(err => console.error(err));
+ * 
+ * @param amount - Monto dinámico de la venta tomado de las variables de la panadería
+ * @param reference - Folio de ticket o referencia de la panadería
+ */
+export async function executeClipPaymentFetch(amount: number, reference?: string): Promise<any> {
+  const config = getStoredClipConfig();
+  const serial = config.serialNumber?.trim() || DEFAULT_CLIP_SERIAL;
+  const numAmount = typeof amount === 'number' ? amount : parseFloat(String(amount)) || 0;
+  const formattedAmount = numAmount.toFixed(2);
+  const paymentRef = (reference || `PAN-${Date.now()}`).substring(0, 40);
+
+  // Normalizar encabezado Authorization
+  let authHeader = '';
+  const apiKey = (config.apiKey || '').trim();
+  const secretKey = (config.secretKey || '').trim();
+
+  if (/^basic\s+/i.test(apiKey) || /^bearer\s+/i.test(apiKey)) {
+    authHeader = apiKey;
+  } else if (apiKey && secretKey) {
+    authHeader = `Basic ${btoa(`${apiKey}:${secretKey}`)}`;
+  } else if (apiKey) {
+    authHeader = apiKey.includes(':') ? `Basic ${btoa(apiKey)}` : `Basic ${apiKey}`;
+  }
+
+  const options: RequestInit = {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(authHeader ? { 'Authorization': authHeader } : {})
+    },
+    body: JSON.stringify({
+      amount: formattedAmount,
+      reference: paymentRef,
+      serial_number_pos: serial
+    })
+  };
+
+  console.log('[Clip Fetch] Enviando intención de cobro con variables de la aplicación:', {
+    url: 'https://api.payclip.io/f2f/pinpad/v1/payment',
+    amount: formattedAmount,
+    reference: paymentRef,
+    serial_number_pos: serial,
+    hasAuth: Boolean(authHeader)
+  });
+
+  return fetch('https://api.payclip.io/f2f/pinpad/v1/payment', options)
+    .then(res => {
+      console.log('[Clip Fetch HTTP Status]:', res.status);
+      return res.json().then(data => ({
+        httpStatus: res.status,
+        ok: res.ok,
+        data
+      }));
+    })
+    .then(res => {
+      console.log('[Clip Fetch Response Body]:', res);
+      return res;
+    })
+    .catch(err => {
+      console.error('[Clip Fetch Network Error]:', err);
+      throw err;
+    });
+}
+
+// Exponer en el objeto global del navegador para pruebas en consola de Windows
+if (typeof window !== 'undefined') {
+  (window as any).clipPaymentFetch = executeClipPaymentFetch;
+}
+
+/**
  * Enviar orden de cobro 100% REAL a la terminal Clip
+ * Integra el fetch directo con fallback automático a la función de Netlify si el navegador bloquea CORS.
  */
 export async function sendPaymentToClipTerminal(
   amount: number,
@@ -94,7 +194,25 @@ export async function sendPaymentToClipTerminal(
 }> {
   const config = getStoredClipConfig();
   const serial = config.serialNumber?.trim() || DEFAULT_CLIP_SERIAL;
+  const numAmount = typeof amount === 'number' ? amount : parseFloat(String(amount)) || 0;
 
+  // 1. Intentar el fetch directo a api.payclip.io conforme al snippet oficial
+  try {
+    const directResult = await executeClipPaymentFetch(numAmount, reference);
+    if (directResult && directResult.ok) {
+      const data = directResult.data;
+      return {
+        success: true,
+        pinpadRequestId: data.pinpad_request_id || data.id,
+        httpStatus: directResult.httpStatus,
+        details: data
+      };
+    }
+  } catch (directErr) {
+    console.log('[Clip Service] Fetch directo falló o fue bloqueado por CORS del navegador, recurriendo a la función de Netlify:', directErr);
+  }
+
+  // 2. Ejecutar mediante la función segura de Netlify (que no tiene bloqueos CORS de navegador)
   try {
     const endpoint = '/.netlify/functions/clip-payment';
     const response = await fetch(endpoint, {
@@ -104,7 +222,7 @@ export async function sendPaymentToClipTerminal(
       },
       body: JSON.stringify({
         action: 'create_payment',
-        amount,
+        amount: numAmount,
         reference,
         serial_number_pos: serial,
         api_key: config.apiKey || undefined,
@@ -135,7 +253,9 @@ export async function sendPaymentToClipTerminal(
 
     return {
       success: true,
-      pinpadRequestId: data.pinpad_request_id || data.id
+      pinpadRequestId: data.pinpad_request_id || data.id,
+      httpStatus: response.status,
+      details: data
     };
 
   } catch (err: any) {
