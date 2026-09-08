@@ -1,12 +1,13 @@
 /**
  * Frontend Service: clipService.ts
- * Comunicación con la Netlify Function para cobro en Terminal Clip Wi-Fi
+ * Comunicación directa con la Terminal Clip Wi-Fi a través de la función de backend
  */
 
 export interface ClipConfig {
   serialNumber: string;
   terminalName?: string;
   autoPrintReceipt?: boolean;
+  apiKey?: string; // Opcional: permite configurar la llave directamente en la app
 }
 
 export type ClipErrorType = 
@@ -31,10 +32,10 @@ export interface ClipPaymentResult {
   message?: string;
   httpStatus?: number;
   details?: any;
-  isMock?: boolean;
 }
 
 const STORAGE_KEY = 'bakery_clip_terminal_config';
+export const DEFAULT_CLIP_SERIAL = 'P8C2240805000156';
 
 // Obtener configuración guardada de la terminal Clip en el navegador
 export function getStoredClipConfig(): ClipConfig {
@@ -43,6 +44,15 @@ export function getStoredClipConfig(): ClipConfig {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed.serialNumber === 'string') {
+        // Auto-corregir número de serie previo con typo (4 ceros -> 3 ceros)
+        if (
+          parsed.serialNumber === 'P8C22408050000156' || 
+          parsed.serialNumber === '08221800012345' ||
+          parsed.serialNumber.trim() === ''
+        ) {
+          parsed.serialNumber = DEFAULT_CLIP_SERIAL;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
         return parsed;
       }
     }
@@ -50,7 +60,7 @@ export function getStoredClipConfig(): ClipConfig {
     console.error('Error al leer configuración de Clip:', e);
   }
   return {
-    serialNumber: 'P8C22408050000156',
+    serialNumber: DEFAULT_CLIP_SERIAL,
     terminalName: 'Clip Total Wi-Fi (Caja)',
     autoPrintReceipt: true
   };
@@ -68,7 +78,7 @@ export function saveClipConfig(config: Partial<ClipConfig>): void {
 }
 
 /**
- * Enviar orden de cobro a la terminal Clip a través de la Netlify Function
+ * Enviar orden de cobro 100% REAL a la terminal Clip
  */
 export async function sendPaymentToClipTerminal(
   amount: number,
@@ -80,13 +90,11 @@ export async function sendPaymentToClipTerminal(
   message?: string;
   httpStatus?: number;
   details?: any;
-  isMock?: boolean;
 }> {
   const config = getStoredClipConfig();
-  const serial = config.serialNumber?.trim() || 'P8C22408050000156';
+  const serial = config.serialNumber?.trim() || DEFAULT_CLIP_SERIAL;
 
   try {
-    // Intentamos primero /.netlify/functions/clip-payment y como respaldo /api/clip-payment
     const endpoint = '/.netlify/functions/clip-payment';
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -97,7 +105,8 @@ export async function sendPaymentToClipTerminal(
         action: 'create_payment',
         amount,
         reference,
-        serial_number_pos: serial
+        serial_number_pos: serial,
+        api_key: config.apiKey || undefined
       })
     });
 
@@ -117,36 +126,36 @@ export async function sendPaymentToClipTerminal(
         success: false,
         errorType: errType,
         httpStatus: response.status,
-        message: data.message || `Error del servidor Clip (${response.status})`,
+        message: data.message || `Error de conexión con la terminal Clip (${response.status})`,
         details: data.details || data
       };
     }
 
     return {
       success: true,
-      pinpadRequestId: data.pinpad_request_id || data.id,
-      isMock: Boolean(data.is_mock)
+      pinpadRequestId: data.pinpad_request_id || data.id
     };
 
   } catch (err: any) {
-    console.warn('Fallo de red al conectar con Netlify Function:', err);
+    console.warn('Fallo de red al conectar con terminal Clip:', err);
     return {
       success: false,
       errorType: 'TERMINAL_TIMEOUT',
-      message: 'No se pudo conectar con el servicio de cobro. Revisa tu conexión a internet o la terminal Clip.'
+      message: 'No se pudo contactar la terminal Clip. Revisa que esté encendida y conectada a tu Wi-Fi.'
     };
   }
 }
 
 /**
- * Consulta periódica (Polling) del estado del cobro en la terminal Clip
+ * Consulta periódica (Polling) del estado del cobro en la terminal Clip (Sin simulación)
  */
 export async function pollClipPaymentStatus(
   pinpadRequestId: string,
   onStatusUpdate: (statusText: string) => void,
   signal?: AbortSignal,
-  maxAttempts: number = 30 // 30 intentos * 2.5s = ~75 segundos
+  maxAttempts: number = 36 // 36 intentos * 2.5s = ~90 segundos para que el cliente deslice/inserte tarjeta
 ): Promise<ClipPaymentResult> {
+  const config = getStoredClipConfig();
   let attempts = 0;
 
   while (attempts < maxAttempts) {
@@ -154,12 +163,12 @@ export async function pollClipPaymentStatus(
       return {
         success: false,
         errorType: 'CANCELLED',
-        message: 'Operación cancelada por la cajera.'
+        message: 'Operación cancelada en caja.'
       };
     }
 
     attempts++;
-    onStatusUpdate(`Esperando tarjeta o NIP en la terminal Clip... (${attempts}/${maxAttempts})`);
+    onStatusUpdate(`Esperando tarjeta o NIP en tu terminal Clip... (${attempts}/${maxAttempts})`);
 
     try {
       const response = await fetch('/.netlify/functions/clip-payment', {
@@ -167,7 +176,8 @@ export async function pollClipPaymentStatus(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'check_status',
-          pinpad_request_id: pinpadRequestId
+          pinpad_request_id: pinpadRequestId,
+          api_key: config.apiKey || undefined
         }),
         signal
       });
@@ -180,10 +190,9 @@ export async function pollClipPaymentStatus(
           return {
             success: true,
             status: 'APPROVED',
-            authCode: data.auth_code || data.authCode || 'CLIP-' + Math.floor(100000 + Math.random() * 900000),
+            authCode: data.auth_code || data.authCode || data.authorization_code || 'APROBADO',
             last4: data.last_4 || data.last4 || data.card?.last4 || '••••',
-            reference: data.reference,
-            isMock: Boolean(data.is_mock)
+            reference: data.reference || pinpadRequestId
           };
         }
 
@@ -199,7 +208,7 @@ export async function pollClipPaymentStatus(
           return {
             success: false,
             status: 'CANCELLED',
-            message: 'El cobro fue cancelado en la terminal Clip.'
+            message: 'El cobro fue cancelado en la pantalla de la terminal Clip.'
           };
         }
       }
@@ -207,10 +216,10 @@ export async function pollClipPaymentStatus(
       if (signal?.aborted) {
         return { success: false, errorType: 'CANCELLED', message: 'Operación cancelada.' };
       }
-      console.warn('Intento de sondeo fallido:', err);
+      console.warn('Sondeo Clip en curso:', err);
     }
 
-    // Esperar 2.5 segundos antes del siguiente intento
+    // Pausa de 2.5 segundos entre revisiones
     await new Promise(resolve => setTimeout(resolve, 2500));
   }
 
@@ -218,12 +227,12 @@ export async function pollClipPaymentStatus(
     success: false,
     status: 'TIMEOUT',
     errorType: 'TERMINAL_TIMEOUT',
-    message: 'Tiempo de espera agotado. El cliente no insertó o acercó su tarjeta a tiempo.'
+    message: 'Tiempo de espera agotado en la terminal. El cliente no completó el pago a tiempo.'
   };
 }
 
 /**
- * Diagnosticar conexión con Clip y estado de Netlify
+ * Diagnosticar conexión real con Clip y estado del servidor
  */
 export async function diagnoseClipConnection(serialNumber?: string): Promise<{
   success: boolean;
@@ -236,14 +245,15 @@ export async function diagnoseClipConnection(serialNumber?: string): Promise<{
 }> {
   try {
     const config = getStoredClipConfig();
-    const serial = serialNumber || config.serialNumber || 'P8C22408050000156';
+    const serial = serialNumber || config.serialNumber || DEFAULT_CLIP_SERIAL;
 
     const response = await fetch('/.netlify/functions/clip-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'diagnose',
-        serial_number_pos: serial
+        serial_number_pos: serial,
+        api_key: config.apiKey || undefined
       })
     });
 
@@ -261,7 +271,7 @@ export async function diagnoseClipConnection(serialNumber?: string): Promise<{
     return {
       success: false,
       status: 'FETCH_ERROR',
-      message: err.message || 'No se pudo contactar la función de Netlify.'
+      message: err.message || 'No se pudo contactar el servicio de Clip.'
     };
   }
 }

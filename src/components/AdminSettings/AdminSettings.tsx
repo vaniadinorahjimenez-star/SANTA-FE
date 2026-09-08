@@ -1399,7 +1399,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Número de Serie de la Terminal Clip:
@@ -1412,17 +1412,17 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     setClipConfig(updated);
                     saveClipConfig(updated);
                   }}
-                  placeholder="Ej. 08221800012345 o N600-XXXXX"
+                  placeholder="P8C2240805000156"
                   className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs font-bold focus:ring-2 focus:ring-orange-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Lo encuentras en la etiqueta trasera de tu terminal Clip o en Ajustes → Acerca del dispositivo.
+                  Serie oficial de tu terminal: <strong>P8C2240805000156</strong>.
                 </span>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Nombre Identificador de la Terminal:
+                  Nombre de la Terminal:
                 </label>
                 <input
                   type="text"
@@ -1432,9 +1432,32 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     setClipConfig(updated);
                     saveClipConfig(updated);
                   }}
-                  placeholder="Ej. Clip Total Caja Mostrador"
+                  placeholder="Clip Total Mostrador"
                   className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 text-xs font-bold focus:ring-2 focus:ring-orange-500"
                 />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Identificador visual de caja.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  CLIP_API_KEY (Token de developer.clip.mx):
+                </label>
+                <input
+                  type="password"
+                  value={clipConfig.apiKey || ''}
+                  onChange={(e) => {
+                    const updated = { ...clipConfig, apiKey: e.target.value };
+                    setClipConfig(updated);
+                    saveClipConfig(updated);
+                  }}
+                  placeholder="Pegar token de Clip (Opcional si está en Netlify)"
+                  className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-orange-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Si lo pegas aquí, funciona de inmediato sin requerir deploy en Netlify.
+                </span>
               </div>
             </div>
 

@@ -10,12 +10,9 @@ import {
   Sliders, 
   ArrowRight,
   ShieldCheck,
-  Zap,
   Smartphone,
   KeyRound,
-  ExternalLink,
-  Activity,
-  HelpCircle
+  Activity
 } from 'lucide-react';
 import { 
   getStoredClipConfig, 
@@ -24,7 +21,7 @@ import {
   pollClipPaymentStatus, 
   diagnoseClipConnection,
   ClipPaymentResult,
-  ClipErrorType
+  DEFAULT_CLIP_SERIAL
 } from '../../services/clipService';
 
 interface ClipPaymentModalProps {
@@ -42,17 +39,17 @@ interface ClipPaymentModalProps {
 }
 
 type PaymentStep = 
-  | 'INITIATING'             // Enviando a la terminal
-  | 'AWAITING_CARD'          // Esperando que el cliente pase la tarjeta en la terminal
-  | 'APPROVED'               // Aprobado
+  | 'INITIATING'             // Conectando con la terminal por Wi-Fi
+  | 'AWAITING_CARD'          // Terminal activa esperando tarjeta o NIP
+  | 'APPROVED'               // Cobro aprobado en la terminal
   | 'NETLIFY_REDEPLOY_ERROR' // Faltó hacer deploy en Netlify tras guardar variables
-  | 'AUTH_ERROR'             // Error 401: API Key inválida o mal formateada
-  | 'SERIAL_NOT_FOUND'       // Error 404/400: La serie no está en la cuenta Clip
-  | 'OFFLINE_ERROR'          // Terminal apagada o sin señal Wi-Fi
-  | 'TIMEOUT_ERROR'          // Tiempo agotado
+  | 'AUTH_ERROR'             // Error 401: API Key rechazada por Clip
+  | 'SERIAL_NOT_FOUND'       // Serie no registrada en la cuenta Clip
+  | 'OFFLINE_ERROR'          // Terminal apagada o sin internet Wi-Fi
+  | 'TIMEOUT_ERROR'          // Tiempo de espera agotado
   | 'BUSY_ERROR'             // Terminal ocupada
   | 'DIAGNOSTIC'             // Diagnóstico en vivo
-  | 'MANUAL_AUTH';           // Fallback de autorización manual
+  | 'MANUAL_AUTH';           // Autorización manual de respaldo
 
 export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   isOpen,
@@ -63,7 +60,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   onPaymentApproved
 }) => {
   const [step, setStep] = useState<PaymentStep>('INITIATING');
-  const [statusMessage, setStatusMessage] = useState<string>('Conectando con la terminal Clip...');
+  const [statusMessage, setStatusMessage] = useState<string>('Enviando orden a la terminal Clip por Wi-Fi...');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [errorDetails, setErrorDetails] = useState<any>(null);
   const [authCode, setAuthCode] = useState<string>('');
@@ -71,9 +68,8 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
   const [isEditingSerial, setIsEditingSerial] = useState<boolean>(false);
   const [serialInput, setSerialInput] = useState<string>('');
   const [config, setConfig] = useState(getStoredClipConfig());
-  const [isMockSimulation, setIsMockSimulation] = useState<boolean>(false);
 
-  // Fallback manual inputs
+  // Fallback manual de respaldo
   const [manualAuthCode, setManualAuthCode] = useState<string>('');
   const [manualLast4, setManualLast4] = useState<string>('');
 
@@ -83,13 +79,13 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Inicializar y lanzar el cobro automático al abrir el modal
+  // Inicializar y lanzar el cobro REAL al abrir el modal
   useEffect(() => {
     if (!isOpen) return;
 
     const stored = getStoredClipConfig();
     setConfig(stored);
-    setSerialInput(stored.serialNumber || 'P8C22408050000156');
+    setSerialInput(stored.serialNumber || DEFAULT_CLIP_SERIAL);
     startClipTransaction();
 
     return () => {
@@ -107,7 +103,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     abortControllerRef.current = controller;
 
     setStep('INITIATING');
-    setStatusMessage('Enviando monto a la terminal Clip por Wi-Fi...');
+    setStatusMessage('Contactando a la terminal Clip P8C2240805000156 vía Wi-Fi...');
     setErrorMessage('');
     setErrorDetails(null);
 
@@ -119,12 +115,12 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
       if (sendRes.errorType === 'NETLIFY_REDEPLOY_NEEDED') {
         setStep('NETLIFY_REDEPLOY_ERROR');
         setErrorMessage(
-          sendRes.message || 'Se requiere desplegar nuevamente el sitio en Netlify para aplicar tus variables.'
+          sendRes.message || 'Se requiere desplegar nuevamente el sitio en Netlify para activar CLIP_API_KEY.'
         );
       } else if (sendRes.errorType === 'CLIP_AUTH_ERROR' || sendRes.httpStatus === 401) {
         setStep('AUTH_ERROR');
         setErrorMessage(
-          sendRes.message || 'Clip no reconoció la clave de autorización (Error 401). Verifica CLIP_API_KEY.'
+          sendRes.message || 'Clip no reconoció la clave de autorización (Error 401). Verifica tu CLIP_API_KEY.'
         );
       } else if (sendRes.errorType === 'DEVICE_NOT_FOUND' || sendRes.httpStatus === 404) {
         setStep('SERIAL_NOT_FOUND');
@@ -144,48 +140,47 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
       } else {
         setStep('OFFLINE_ERROR');
         setErrorMessage(
-          sendRes.message || 'No fue posible contactar a la terminal Clip. Verifica tu conexión Wi-Fi.'
+          sendRes.message || 'No fue posible contactar a la terminal Clip. Revisa que esté encendida y conectada a Wi-Fi.'
         );
       }
       return;
     }
 
-    setIsMockSimulation(Boolean(sendRes.isMock));
     setStep('AWAITING_CARD');
-    setStatusMessage('Esperando que el cliente acerque, inserte o deslice su tarjeta en la pantalla Clip...');
+    setStatusMessage('Terminal conectada. Pasa, inserta o acerca la tarjeta en la pantalla Clip...');
 
-    // Iniciar sondeo (polling) del estado en la terminal
+    // Iniciar sondeo (polling) REAL en la terminal Clip
     const pollRes: ClipPaymentResult = await pollClipPaymentStatus(
-      sendRes.pinpadRequestId || 'req_auto',
+      sendRes.pinpadRequestId || folio,
       (msg) => setStatusMessage(msg),
       controller.signal
     );
 
     if (pollRes.success && pollRes.status === 'APPROVED') {
-      const generatedAuth = pollRes.authCode || 'CLIP-' + Math.floor(100000 + Math.random() * 900000);
-      const generatedLast4 = pollRes.last4 || '••••';
-      setAuthCode(generatedAuth);
-      setLast4(generatedLast4);
+      const confirmedAuth = pollRes.authCode || 'APROBADO';
+      const confirmedLast4 = pollRes.last4 || '••••';
+      setAuthCode(confirmedAuth);
+      setLast4(confirmedLast4);
       setStep('APPROVED');
 
       setTimeout(() => {
         onPaymentApproved({
           terminal: 'clip',
-          authCode: generatedAuth,
-          last4: generatedLast4,
+          authCode: confirmedAuth,
+          last4: confirmedLast4,
           reference: folio
         });
-      }, 1200);
+      }, 1400);
     } else {
       if (pollRes.errorType === 'CANCELLED') {
         return;
       }
       if (pollRes.errorType === 'TERMINAL_TIMEOUT' || pollRes.status === 'TIMEOUT') {
         setStep('TIMEOUT_ERROR');
-        setErrorMessage(pollRes.message || 'Tiempo agotado sin respuesta del cliente.');
+        setErrorMessage(pollRes.message || 'Tiempo agotado sin pasar la tarjeta en la terminal.');
       } else {
         setStep('OFFLINE_ERROR');
-        setErrorMessage(pollRes.message || 'La operación no pudo completarse en la terminal.');
+        setErrorMessage(pollRes.message || 'La operación en la terminal no pudo completarse.');
       }
     }
   };
@@ -212,21 +207,6 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
     });
   };
 
-  const handleForceApproveDemo = () => {
-    const dummyAuth = 'CLIP-DEMO-' + Math.floor(1000 + Math.random() * 9000);
-    setAuthCode(dummyAuth);
-    setLast4('4242');
-    setStep('APPROVED');
-    setTimeout(() => {
-      onPaymentApproved({
-        terminal: 'clip',
-        authCode: dummyAuth,
-        last4: '4242',
-        reference: folio
-      });
-    }, 800);
-  };
-
   const runDiagnostic = async () => {
     setStep('DIAGNOSTIC');
     setDiagnosticLoading(true);
@@ -251,11 +231,11 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="font-extrabold text-base tracking-tight leading-tight">Terminal Clip Wi-Fi</h3>
                 <span className="text-[10px] bg-white/25 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">
-                  Automático
+                  En Vivo
                 </span>
               </div>
               <p className="text-xs text-orange-100 font-medium">
-                {config.terminalName || 'Clip Total Wi-Fi (Caja)'}
+                Serie: {config.serialNumber || DEFAULT_CLIP_SERIAL}
               </p>
             </div>
           </div>
@@ -300,7 +280,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
             className="text-[11px] font-bold text-orange-600 hover:text-orange-700 cursor-pointer flex items-center gap-1"
           >
             <Sliders className="w-3 h-3" />
-            {isEditingSerial ? 'Cerrar' : 'Cambiar terminal'}
+            {isEditingSerial ? 'Cerrar' : 'Modificar serie'}
           </button>
         </div>
 
@@ -308,14 +288,14 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
         {isEditingSerial && (
           <form onSubmit={handleSaveSerial} className="p-4 bg-slate-100 border-b border-slate-200 space-y-2">
             <label className="block text-xs font-bold text-slate-700">
-              Número de Serie de la Terminal Clip (P8C... o etiqueta trasera):
+              Número de Serie de la Terminal Clip:
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={serialInput}
                 onChange={(e) => setSerialInput(e.target.value)}
-                placeholder="Ej. P8C22408050000156"
+                placeholder="P8C2240805000156"
                 className="flex-1 px-3 py-1.5 bg-white rounded-xl border border-slate-300 text-xs font-mono font-bold focus:ring-2 focus:ring-orange-500"
               />
               <button
@@ -331,7 +311,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
         {/* Contenido Dinámico por Estado */}
         <div className="p-6 flex flex-col items-center justify-center min-h-[260px] text-center">
 
-          {/* ESTADO 1: INICIANDO COBRO */}
+          {/* ESTADO 1: INICIANDO COBRO EN LA TERMINAL */}
           {step === 'INITIATING' && (
             <div className="flex flex-col items-center space-y-4">
               <div className="relative">
@@ -341,13 +321,13 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                 <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#FF5A00] border-2 border-white animate-ping" />
               </div>
               <div>
-                <h4 className="font-extrabold text-slate-900 text-base">Enviando orden a la terminal...</h4>
+                <h4 className="font-extrabold text-slate-900 text-base">Enviando monto a la terminal...</h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-xs">{statusMessage}</p>
               </div>
             </div>
           )}
 
-          {/* ESTADO 2: ESPERANDO TARJETA EN LA TERMINAL CLIP */}
+          {/* ESTADO 2: ESPERANDO TARJETA REAL EN LA TERMINAL CLIP */}
           {step === 'AWAITING_CARD' && (
             <div className="flex flex-col items-center space-y-4 animate-in fade-in">
               <div className="relative">
@@ -364,24 +344,11 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                 <p className="text-xs text-slate-600 font-medium max-w-xs">
                   {statusMessage}
                 </p>
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold mt-2">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold mt-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                  Terminal activa • Esperando NIP / Tarjeta
+                  Terminal {config.serialNumber} Conectada
                 </div>
               </div>
-
-              {isMockSimulation && (
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={handleForceApproveDemo}
-                    className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3 py-1.5 rounded-lg shadow-xs cursor-pointer flex items-center gap-1"
-                  >
-                    <Zap className="w-3 h-3" />
-                    Aprobar Pago (Simulación de Prueba)
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
@@ -468,19 +435,16 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               </div>
 
               <div className="bg-red-50 border border-red-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1.5 w-full">
-                <strong className="text-red-900 font-bold block">¿Cómo corregir la llave en Netlify?</strong>
+                <strong className="text-red-900 font-bold block">¿Cómo verificar tu llave?</strong>
                 <ul className="list-disc pl-4 space-y-1 text-[11px]">
                   <li>
-                    Ingresa a <strong>developer.clip.mx</strong> y ve a <strong>Credenciales API</strong>.
+                    Entra a <strong>developer.clip.mx</strong> y ve a <strong>Credenciales API</strong>.
                   </li>
                   <li>
-                    Asegúrate de copiar el <strong>Token Basic</strong> completo (o combina <code className="bg-white px-1 py-0.5 rounded border border-red-200">api_key:secret_key</code>).
+                    Asegúrate de copiar el <strong>Token de Producción (Live)</strong> ya que tu terminal {config.serialNumber} es física real.
                   </li>
                   <li>
-                    Si tu terminal es física real, asegúrate de que la llave sea de <strong>Producción (Live)</strong> y no de Pruebas (Sandbox).
-                  </li>
-                  <li>
-                    Después de editarla en Netlify, recuerda hacer <strong>Trigger deploy</strong>.
+                    Puedes ingresarla directamente en <strong>Ajustes de la Panadería</strong> para probar al instante.
                   </li>
                 </ul>
               </div>
@@ -506,7 +470,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
             </div>
           )}
 
-          {/* ESTADO 4C: SERIE NO ENCONTRADA EN CLIP (404/400) */}
+          {/* ESTADO 4C: SERIE NO ENCONTRADA EN CLIP */}
           {step === 'SERIAL_NOT_FOUND' && (
             <div className="flex flex-col items-center space-y-3 w-full text-left">
               <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 self-center">
@@ -516,13 +480,13 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               <div className="text-center w-full">
                 <h4 className="font-black text-slate-900 text-base">Terminal no Registrada en la Cuenta</h4>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  La serie <strong className="font-mono">{config.serialNumber}</strong> no pertenece a la cuenta de Clip vinculada.
+                  La serie <strong className="font-mono">{config.serialNumber}</strong> no pertenece a la cuenta Clip vinculada.
                 </p>
               </div>
 
               <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3 text-xs text-slate-700 space-y-1 w-full">
                 <p className="text-[11px]">
-                  Verifica en la app de Clip en tu teléfono o en el menú de la terminal (Ajustes → Dispositivo) que el número de serie sea exacto y que la terminal esté dada de alta en la misma cuenta del API Key.
+                  Verifica en la app de Clip en tu teléfono que la terminal esté activada bajo la misma cuenta con la que generaste la API Key.
                 </p>
               </div>
 
@@ -567,9 +531,9 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                   <span>Pasos para solucionar:</span>
                 </div>
                 <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-slate-700">
-                  <li>Verifica que la terminal Clip esté <strong>encendida</strong> con pantalla activa.</li>
+                  <li>Verifica que la terminal Clip <strong>{config.serialNumber}</strong> esté encendida con pantalla activa.</li>
                   <li>Revisa que el ícono de <strong>Wi-Fi</strong> en la terminal esté conectado a tu red.</li>
-                  <li>Confirma que en Netlify hayas hecho <strong>Trigger deploy</strong> tras agregar las variables.</li>
+                  <li>Si acabas de agregar variables en Netlify, haz <strong>Trigger deploy</strong>.</li>
                 </ul>
               </div>
 
@@ -599,7 +563,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
                 className="text-[11px] text-slate-500 hover:text-slate-800 underline font-semibold mt-1 cursor-pointer flex items-center gap-1"
               >
                 <Activity className="w-3 h-3" />
-                Ver diagnóstico detallado del sistema
+                Ver diagnóstico en vivo
               </button>
             </div>
           )}
@@ -641,7 +605,7 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               <div className="flex items-center justify-between w-full border-b border-slate-200 pb-2">
                 <div className="flex items-center gap-2">
                   <Activity className="w-5 h-5 text-orange-600" />
-                  <h4 className="font-black text-slate-900 text-sm">Diagnóstico de Conexión Clip</h4>
+                  <h4 className="font-black text-slate-900 text-sm">Diagnóstico de Terminal Clip</h4>
                 </div>
                 <button
                   type="button"
@@ -655,35 +619,28 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
               {diagnosticLoading ? (
                 <div className="py-8 flex flex-col items-center justify-center gap-2">
                   <RefreshCw className="w-6 h-6 text-orange-500 animate-spin" />
-                  <span className="text-xs text-slate-500 font-bold">Consultando Netlify y Clip...</span>
+                  <span className="text-xs text-slate-500 font-bold">Consultando conexión con Clip...</span>
                 </div>
               ) : diagnosticResult ? (
                 <div className="space-y-2 w-full text-xs">
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
                     <div className="flex justify-between">
-                      <span className="text-slate-600 font-medium">CLIP_API_KEY en Netlify:</span>
+                      <span className="text-slate-600 font-medium">CLIP_API_KEY:</span>
                       <strong className={diagnosticResult.diagnosis?.has_api_key ? 'text-emerald-700' : 'text-red-600'}>
-                        {diagnosticResult.diagnosis?.has_api_key ? '✅ Detectada' : '❌ No detectada (Haz Trigger Deploy)'}
+                        {diagnosticResult.diagnosis?.has_api_key ? '✅ Activa' : '❌ No detectada (Haz Trigger Deploy)'}
                       </strong>
                     </div>
 
                     <div className="flex justify-between">
-                      <span className="text-slate-600 font-medium">Formato Token:</span>
+                      <span className="text-slate-600 font-medium">Serie de Terminal:</span>
                       <span className="font-mono text-[11px] text-slate-800 font-bold">
-                        {diagnosticResult.diagnosis?.auth_header_format || 'N/A'}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <span className="text-slate-600 font-medium">CLIP_TERMINAL_SERIAL:</span>
-                      <span className="font-mono text-[11px] text-slate-800">
                         {diagnosticResult.diagnosis?.env_serial_value || config.serialNumber}
                       </span>
                     </div>
 
                     {diagnosticResult.clip_http_status && (
                       <div className="flex justify-between pt-1 border-t border-slate-200">
-                        <span className="text-slate-600 font-medium">Respuesta API Clip:</span>
+                        <span className="text-slate-600 font-medium">Respuesta Servidor Clip:</span>
                         <span className={`font-mono font-bold ${diagnosticResult.clip_http_status === 200 ? 'text-emerald-600' : 'text-orange-600'}`}>
                           HTTP {diagnosticResult.clip_http_status}
                         </span>
@@ -777,14 +734,14 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
         <div className="bg-slate-50 border-t border-slate-200 px-5 py-3 flex items-center justify-between text-xs text-slate-500">
           <span className="text-[11px] font-medium flex items-center gap-1">
             <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-            Clip Pay API • Conexión Wi-Fi Segura
+            Terminal Clip P8C2240805000156 • Wi-Fi Activo
           </span>
           <button
             type="button"
             onClick={onClose}
             className="text-slate-600 hover:text-slate-900 font-bold text-xs cursor-pointer hover:underline"
           >
-            Cancelar operación
+            Cancelar
           </button>
         </div>
 
