@@ -35,22 +35,30 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
 
               // Construir encabezado Authorization según especificaciones de Clip
               let authHeader = '';
-              const apiKey = (rawApiKey || '').trim();
-              const secretKey = (rawSecretKey || '').trim();
+              let apiKey = (rawApiKey || '').trim();
+              let secretKey = (rawSecretKey || '').trim();
 
-              if (apiKey && secretKey) {
+              if ((apiKey.startsWith('"') && apiKey.endsWith('"')) || (apiKey.startsWith("'") && apiKey.endsWith("'"))) {
+                apiKey = apiKey.slice(1, -1).trim();
+              }
+              if ((secretKey.startsWith('"') && secretKey.endsWith('"')) || (secretKey.startsWith("'") && secretKey.endsWith("'"))) {
+                secretKey = secretKey.slice(1, -1).trim();
+              }
+
+              if (/^basic\s+/i.test(apiKey) || /^bearer\s+/i.test(apiKey)) {
+                authHeader = apiKey;
+              } else if (/^basic\s+/i.test(secretKey) || /^bearer\s+/i.test(secretKey)) {
+                authHeader = secretKey;
+              } else if (apiKey && secretKey) {
                 authHeader = `Basic ${Buffer.from(`${apiKey}:${secretKey}`).toString('base64')}`;
-              } else if (apiKey) {
-                let key = apiKey;
-                if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
-                  key = key.slice(1, -1).trim();
-                }
-                if (/^basic\s+/i.test(key) || /^bearer\s+/i.test(key)) {
-                  authHeader = key;
-                } else if (key.includes(':')) {
-                  authHeader = `Basic ${Buffer.from(key).toString('base64')}`;
-                } else {
-                  authHeader = `Basic ${key}`;
+              } else {
+                const singleToken = apiKey || secretKey;
+                if (singleToken) {
+                  if (singleToken.includes(':')) {
+                    authHeader = `Basic ${Buffer.from(singleToken).toString('base64')}`;
+                  } else {
+                    authHeader = `Basic ${singleToken}`;
+                  }
                 }
               }
 
@@ -136,15 +144,22 @@ function clipNetlifyFunctionDevPlugin(): Plugin {
               // CRUCIAL: "amount" debe ser un string con 2 decimales según la API de Clip
               const formattedAmount = isNaN(numAmount) ? '0.00' : numAmount.toFixed(2);
 
+              const clipBody: any = {
+                amount: formattedAmount,
+                reference: (payload.reference || `PAN-${Date.now()}`).substring(0, 40),
+                serial_number_pos: serial
+              };
+              if (payload.tip_amount) {
+                clipBody.tip_amount = String(payload.tip_amount);
+              }
+              if (payload.preferences && typeof payload.preferences === 'object') {
+                clipBody.preferences = payload.preferences;
+              }
+
               const clipRes = await fetch('https://api.payclip.io/f2f/pinpad/v1/payment', {
                 method: 'POST',
                 headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  amount: formattedAmount,
-                  reference: (payload.reference || `PAN-${Date.now()}`).substring(0, 40),
-                  serial_number_pos: serial,
-                  preferences: { is_auto_print_receipt_enabled: true, is_tip_enabled: false, is_retry_enabled: true }
-                })
+                body: JSON.stringify(clipBody)
               });
 
               const clipData = await clipRes.json().catch(() => ({}));

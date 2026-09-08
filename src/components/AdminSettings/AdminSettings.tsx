@@ -1458,7 +1458,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  API Key (developer.clip.mx):
+                  Token de Acceso o API Key (developer.clip.mx):
                 </label>
                 <input
                   type="text"
@@ -1468,17 +1468,17 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     setClipConfig(updated);
                     saveClipConfig(updated);
                   }}
-                  placeholder="Ej: d8e5e789-xxxx-xxxx"
+                  placeholder="Pega aquí tu Token de acceso directo o tu API Key"
                   className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-orange-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Llave pública o Token completo.
+                  Pega aquí tu Token de acceso directo ("TU_TOKEN_DE_ACCESO") o tu API Key.
                 </span>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Secret Key (developer.clip.mx):
+                  Secret Key (opcional si usas Token):
                 </label>
                 <input
                   type="password"
@@ -1488,11 +1488,11 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     setClipConfig(updated);
                     saveClipConfig(updated);
                   }}
-                  placeholder="Clave secreta de Clip"
+                  placeholder="Clave secreta (solo si no pegaste el token directo)"
                   className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-orange-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Requerida junto con la API Key para autenticar.
+                  Requerida únicamente si colocaste la API Key por separado.
                 </span>
               </div>
             </div>
@@ -1501,7 +1501,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               <div className="text-xs text-slate-700">
                 <strong className="text-orange-900 block font-bold">¿Cómo autentica Clip?</strong>
                 <p className="text-[11px] text-slate-600 mt-0.5">
-                  Clip genera un par <strong>API Key</strong> y <strong>Secret Key</strong> en <em>developer.clip.mx &gt; Credenciales API</em>. Ambos datos son necesarios para que la terminal reciba órdenes por Wi-Fi.
+                  Clip autentica vía encabezado <code className="font-mono bg-white px-1 rounded border border-orange-200">Authorization: Basic &lt;Token&gt;</code> (tal como en la documentación oficial de <code className="font-mono">f2f/pinpad/v1/payment</code>). Puedes pegar tu <strong>Token de Acceso directo</strong> o tu combinación <strong>API Key + Secret Key</strong>.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">

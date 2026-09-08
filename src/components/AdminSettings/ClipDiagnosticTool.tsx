@@ -258,35 +258,53 @@ export const ClipDiagnosticTool: React.FC<ClipDiagnosticToolProps> = ({
             />
           </div>
 
-          {/* API Key */}
+          {/* Token o API Key */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
-              api_key:
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-slate-700">
+                Token de Acceso (o API Key):
+              </label>
+              <span className="text-[10px] text-orange-600 font-semibold">
+                "TU_TOKEN_DE_ACCESO"
+              </span>
+            </div>
             <input
               id="diagnostic-api-key-input"
               type="text"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Ej. d8e5e789-xxxx-xxxx"
+              placeholder="Pega aquí tu Token de developer.clip.mx o API Key"
               className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-orange-500"
             />
           </div>
 
           {/* Secret Key */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
-              secret_key:
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-slate-700">
+                Secret Key (opcional si usas Token):
+              </label>
+            </div>
             <input
               id="diagnostic-secret-key-input"
               type="password"
               value={secretKey}
               onChange={(e) => setSecretKey(e.target.value)}
-              placeholder="Clave secreta de developer.clip.mx"
+              placeholder="Clave secreta (solo si no pegaste el token directo)"
               className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-orange-500"
             />
           </div>
+        </div>
+
+        {/* Guía rápida de equivalencia con ejemplo de Clip */}
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 space-y-1">
+          <strong className="block font-bold">💡 Equivalencia con el ejemplo de Clip Developers (VB.NET / REST / HttpClient):</strong>
+          <p>
+            En la documentación oficial de Clip (<code className="font-mono text-blue-950">developer.clip.mx/reference/post_payment-1</code>), el encabezado enviado es <code className="font-mono bg-white px-1 py-0.5 rounded border border-blue-200 text-blue-950">Authorization: Basic &lt;Token&gt;</code>.
+          </p>
+          <p className="text-slate-700">
+            Puedes pegar directamente tu <strong>Token de Acceso</strong> en la primera casilla y presionar <strong>"Ejecutar Diagnóstico Ahora"</strong> para verificar que Clip valide la conexión hacia la terminal <strong>{serial}</strong>.
+          </p>
         </div>
       </div>
 

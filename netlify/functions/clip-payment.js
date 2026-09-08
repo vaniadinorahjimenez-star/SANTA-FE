@@ -24,37 +24,40 @@ const CORS_HEADERS = {
  * Clip API requiere: Authorization: Basic <base64(api_key:secret_key)>
  */
 function buildClipAuthHeader(rawApiKey, rawSecretKey) {
-  const apiKey = (rawApiKey || '').trim();
-  const secretKey = (rawSecretKey || '').trim();
+  let apiKey = (rawApiKey || '').trim();
+  let secretKey = (rawSecretKey || '').trim();
 
-  // Caso 1: Se proporcionan API Key y Secret Key por separado (Formato oficial developer.clip.mx)
+  // Remover comillas envolventes si el usuario las copió del código de ejemplo con comillas ("TU_TOKEN_DE_ACCESO")
+  if ((apiKey.startsWith('"') && apiKey.endsWith('"')) || (apiKey.startsWith("'") && apiKey.endsWith("'"))) {
+    apiKey = apiKey.slice(1, -1).trim();
+  }
+  if ((secretKey.startsWith('"') && secretKey.endsWith('"')) || (secretKey.startsWith("'") && secretKey.endsWith("'"))) {
+    secretKey = secretKey.slice(1, -1).trim();
+  }
+
+  // Si ya incluye "Basic " o "Bearer "
+  if (/^basic\s+/i.test(apiKey) || /^bearer\s+/i.test(apiKey)) {
+    return apiKey;
+  }
+  if (/^basic\s+/i.test(secretKey) || /^bearer\s+/i.test(secretKey)) {
+    return secretKey;
+  }
+
+  // Caso 1: Se proporcionan API Key y Secret Key por separado (Formato developer.clip.mx)
   if (apiKey && secretKey) {
     const combined = `${apiKey}:${secretKey}`;
     const encoded = Buffer.from(combined, 'utf-8').toString('base64');
     return `Basic ${encoded}`;
   }
 
-  // Caso 2: Se ingresó en una sola casilla
-  if (apiKey) {
-    let key = apiKey;
-    // Remover comillas envolventes si el usuario las copió del panel
-    if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
-      key = key.slice(1, -1).trim();
-    }
-
-    // Si ya incluye "Basic " o "Bearer "
-    if (/^basic\s+/i.test(key) || /^bearer\s+/i.test(key)) {
-      return key;
-    }
-
-    // Si tiene dos puntos (formato api_key:secret_key sin codificar)
-    if (key.includes(':')) {
-      const encoded = Buffer.from(key, 'utf-8').toString('base64');
+  // Caso 2: Se ingresó solo un Token de Acceso directo (el "TU_TOKEN_DE_ACCESO" del ejemplo oficial)
+  const singleToken = apiKey || secretKey;
+  if (singleToken) {
+    if (singleToken.includes(':')) {
+      const encoded = Buffer.from(singleToken, 'utf-8').toString('base64');
       return `Basic ${encoded}`;
     }
-
-    // Si ya viene codificado en Base64 o es un token directo
-    return `Basic ${key}`;
+    return `Basic ${singleToken}`;
   }
 
   return '';
@@ -273,16 +276,22 @@ exports.handler = async (event) => {
       const formattedAmount = numAmount.toFixed(2);
       const paymentRef = (reference || `PAN-${Date.now()}`).substring(0, 40);
 
+      // Cuerpo exacto conforme a la especificación oficial de Clip PinPad (ejemplo VB.NET / REST)
       const clipBody = {
         amount: formattedAmount,
         reference: paymentRef,
-        serial_number_pos: serialNumber,
-        preferences: {
-          is_auto_print_receipt_enabled: true,
-          is_tip_enabled: false,
-          is_retry_enabled: true
-        }
+        serial_number_pos: serialNumber
       };
+
+      // Si se envía propina (tip_amount)
+      if (payload.tip_amount) {
+        clipBody.tip_amount = String(payload.tip_amount);
+      }
+
+      // Preferencias opcionales
+      if (payload.preferences && typeof payload.preferences === 'object') {
+        clipBody.preferences = payload.preferences;
+      }
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 16000);

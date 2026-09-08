@@ -464,26 +464,26 @@ export const ClipPaymentModal: React.FC<ClipPaymentModalProps> = ({
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
-                    API Key (Llave pública):
+                    Token de Acceso o API Key:
                   </label>
                   <input
                     type="text"
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder="Ej. d8e5e789-xxxx..."
+                    placeholder="Pega aquí tu Token o API Key"
                     className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 font-mono text-xs focus:ring-2 focus:ring-[#FF5A00]"
                   />
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
-                    Secret Key (Clave secreta):
+                    Secret Key (opcional si pegaste el Token):
                   </label>
                   <input
                     type="password"
                     value={secretKeyInput}
                     onChange={(e) => setSecretKeyInput(e.target.value)}
-                    placeholder="Clave secreta generada en Clip"
+                    placeholder="Clave secreta (solo si no pegaste el token directo)"
                     className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 font-mono text-xs focus:ring-2 focus:ring-[#FF5A00]"
                   />
                 </div>
